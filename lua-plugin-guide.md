@@ -10,18 +10,19 @@
 2. [Метаданные](#метаданные)
 3. [Обязательные функции](#обязательные-функции)
 4. [Работа с HTTP](#работа-с-http)
-5. [Работа с HTML и CSS-селекторами](#работа-с-html-и-css-селекторами)
-6. [Очистка текста](#очистка-текста)
-7. [Работа с JSON API](#работа-с-json-api)
-8. [Каталог и пагинация](#каталог-и-пагинация)
-9. [Список глав](#список-глав)
-10. [Текст главы](#текст-главы)
-11. [Фильтры каталога](#фильтры-каталога)
-12. [Настройки плагина](#настройки-плагина)
-13. [Хелперы и утилиты](#хелперы-и-утилиты)
-14. [Полный справочник API](#полный-справочник-api)
-15. [Полный шаблон плагина](#полный-шаблон-плагина)
-16. [Частые ошибки](#частые-ошибки)
+5. [Кэширование страниц (fetchPage)](#кэширование-страниц-fetchpage)
+6. [Работа с HTML и CSS-селекторами](#работа-с-html-и-css-селекторами)
+7. [Очистка текста](#очистка-текста)
+8. [Работа с JSON API](#работа-с-json-api)
+9. [Каталог и пагинация](#каталог-и-пагинация)
+10. [Список глав](#список-глав)
+11. [Текст главы](#текст-главы)
+12. [Фильтры каталога](#фильтры-каталога)
+13. [Настройки плагина](#настройки-плагина)
+14. [Хелперы и утилиты](#хелперы-и-утилиты)
+15. [Полный справочник API](#полный-справочник-api)
+16. [Полный шаблон плагина](#полный-шаблон-плагина)
+17. [Частые ошибки](#частые-ошибки)
 
 ---
 
@@ -296,6 +297,75 @@ sleep(math.random(150, 350))      -- случайная задержка 150-350
 ```
 
 Используйте `sleep` между запросами в `getChapterList` если сайт агрессивно блокирует парсеры (пример: jaomix).
+
+---
+
+## Кэширование страниц (fetchPage)
+
+Движок вызывает `getBookTitle`, `getBookCoverImageUrl`, `getBookDescription`, `getBookGenres`, `getChapterListHash` и `getChapterList` **параллельно** — каждая из них по умолчанию делает свой `http_get(bookUrl)`. Итого 5–6 одинаковых запросов к одной странице.
+
+Решение — локальный кэш через `fetchPage`. Добавляй его в каждый плагин где несколько функций читают одну и ту же страницу книги.
+
+```lua
+-- Объявить в начале файла, после метаданных
+local _pageCache = {}
+
+local function fetchPage(url)
+    if _pageCache[url] then return _pageCache[url] end
+    local r = http_get(url)
+    if r.success then
+        _pageCache[url] = r.body
+        return r.body
+    end
+    return nil
+end
+```
+
+Затем во всех функциях деталей книги заменить `http_get(bookUrl)` на `fetchPage(bookUrl)`:
+
+```lua
+-- ❌ Каждая функция делает отдельный HTTP-запрос
+function getBookTitle(bookUrl)
+    local r = http_get(bookUrl)
+    if not r.success then return nil end
+    -- ...
+end
+
+function getBookDescription(bookUrl)
+    local r = http_get(bookUrl)  -- второй запрос к той же странице
+    if not r.success then return nil end
+    -- ...
+end
+
+-- ✅ Все функции используют один закэшированный запрос
+function getBookTitle(bookUrl)
+    local body = fetchPage(bookUrl)
+    if not body then return nil end
+    -- ...
+end
+
+function getBookDescription(bookUrl)
+    local body = fetchPage(bookUrl)  -- берётся из кэша, HTTP не идёт
+    if not body then return nil end
+    -- ...
+end
+```
+
+Если `getChapterList` тоже загружает страницу книги (например, для извлечения `novelId` из `og:url`), подключай и его:
+
+```lua
+function getChapterList(bookUrl)
+    local body = fetchPage(bookUrl)  -- бесплатно если уже закэшировано
+    if not body then return {} end
+
+    local ogUrl = html_attr(body, "meta[property='og:url']", "content")
+    -- ... дальше AJAX запрос за главами
+end
+```
+
+**Итог:** вместо 5–6 запросов к странице книги — **1 запрос + N AJAX**.
+
+> **Важно:** кэш живёт только в рамках одного сеанса работы плагина. Между разными вызовами движка он сбрасывается — утечек памяти нет.
 
 ---
 
@@ -1460,6 +1530,33 @@ local genres = filters["genres"]
 -- ✅
 local genres_inc = filters["genres_included"] or {}
 local genres_exc = filters["genres_excluded"] or {}
+```
+
+### 9. Повторные http_get к одной и той же странице
+
+```lua
+-- ❌ Движок вызывает функции параллельно — каждая делает свой запрос
+function getBookTitle(bookUrl)
+    local r = http_get(bookUrl)   -- запрос 1
+    ...
+end
+function getBookDescription(bookUrl)
+    local r = http_get(bookUrl)   -- запрос 2 к той же странице
+    ...
+end
+function getChapterListHash(bookUrl)
+    local r = http_get(bookUrl)   -- запрос 3
+    ...
+end
+
+-- ✅ Используй fetchPage — см. раздел "Кэширование страниц"
+local _pageCache = {}
+local function fetchPage(url)
+    if _pageCache[url] then return _pageCache[url] end
+    local r = http_get(url)
+    if r.success then _pageCache[url] = r.body end
+    return r.success and r.body or nil
+end
 ```
 
 ### 8. Отсутствие log_error при отладке
