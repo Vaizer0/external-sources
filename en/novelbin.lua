@@ -1,10 +1,24 @@
 ﻿-- ── Метаданные ────────────────────────────────────────────────────────────────
 id        = "NovelBin"
 name      = "Novel Bin"
-version   = "1.0.8"
+version   = "1.0.9"
 baseUrl   = "https://novelbin.com/"
 language  = "en"
 icon      = "https://raw.githubusercontent.com/HnDK0/external-sources/main/icons/novelbin.png"
+
+-- ── Кэш страниц (1 запрос вместо 4–5) ────────────────────────────────────────
+
+local _pageCache = {}
+
+local function fetchPage(url)
+  if _pageCache[url] then return _pageCache[url] end
+  local r = http_get(url)
+  if r.success then
+    _pageCache[url] = r.body
+    return r.body
+  end
+  return nil
+end
 
 -- ── Хелперы ───────────────────────────────────────────────────────────────────
 
@@ -87,42 +101,57 @@ function getCatalogSearch(index, query)
   return { items = items, hasNext = #items > 0 }
 end
 
--- ── Детали книги ──────────────────────────────────────────────────────────────
+-- ── Детали книги (все через кэш — 1 запрос) ──────────────────────────────────
 
 function getBookTitle(bookUrl)
-  local r = http_get(bookUrl)
-  if not r.success then return nil end
-  local el = html_select_first(r.body, "h3.title")
-  if el then return string_trim(el.text) end
-  return nil
+  local body = fetchPage(bookUrl)
+  if not body then return nil end
+  local el = html_select_first(body, "h3.title")
+  return el and string_clean(el.text) or nil
 end
 
 function getBookCoverImageUrl(bookUrl)
-  local r = http_get(bookUrl)
-  if not r.success then return nil end
-  local url = html_attr(r.body, "meta[property='og:image']", "content")
-  if url ~= "" then return absUrl(url) end
-  return nil
+  local body = fetchPage(bookUrl)
+  if not body then return nil end
+  local url = html_attr(body, "meta[property='og:image']", "content")
+  return url ~= "" and absUrl(url) or nil
 end
 
 function getBookDescription(bookUrl)
-  local r = http_get(bookUrl)
-  if not r.success then return nil end
-  local el = html_select_first(r.body, "div.desc-text")
-  if el then return string_trim(el.text) end
-  return nil
+  local body = fetchPage(bookUrl)
+  if not body then return nil end
+  local el = html_select_first(body, "div.desc-text")
+  return el and string_trim(el.text) or nil
 end
 
--- ── Список глав (AJAX_BASED) ──────────────────────────────────────────────────
+function getBookGenres(bookUrl)
+  local body = fetchPage(bookUrl)
+  if not body then return {} end
+  local genres = {}
+  for _, li in ipairs(html_select(body, "ul.info.info-meta li, ul.info-meta li")) do
+    local h3 = html_select_first(li.html, "h3")
+    if h3 and string_trim(h3.text) == "Genre:" then
+      for _, a in ipairs(html_select(li.html, "a")) do
+        local g = string_trim(a.text)
+        if g ~= "" then table.insert(genres, g) end
+      end
+      break
+    end
+  end
+  return genres
+end
+
+-- ── Список глав (AJAX) ────────────────────────────────────────────────────────
 
 function getChapterList(bookUrl)
-  local r = http_get(bookUrl)
-  if not r.success then
+  -- fetchPage — уже закэшировано если детали книги запрашивались раньше
+  local body = fetchPage(bookUrl)
+  if not body then
     log_error("getChapterList: failed to load " .. bookUrl)
     return {}
   end
 
-  local ogUrl = html_attr(r.body, "meta[property='og:url']", "content")
+  local ogUrl = html_attr(body, "meta[property='og:url']", "content")
   if ogUrl == "" then
     log_error("getChapterList: no og:url meta")
     return {}
@@ -147,36 +176,29 @@ function getChapterList(bookUrl)
   end
 
   local chapters = {}
-  for _, a in ipairs(html_select(ar.body, "ul.list-chapter li a")) do
-    -- Сначала пробуем взять текст из span внутри ссылки
-    local spanEl = html_select_first(a.html, "span.nchr-text")
-    local title = ""
-    if spanEl then
-      title = string_trim(spanEl.text)
+  for _, li in ipairs(html_select(ar.body, "ul.list-chapter li[data-chapter-item]")) do
+    local a = html_select_first(li.html, "a")
+    if a then
+      local span = html_select_first(li.html, "span.nchr-text")
+      local title = span and string_trim(span.text) or ""
+      if title == "" then title = string_trim(html_attr(li.html, "a", "title")) end
+      if title == "" then title = string_trim(a.text) end
+      if title == "" then title = a.href end
+      table.insert(chapters, { title = title, url = a.href })
     end
-    -- Фоллбэк: атрибут title у самого <a>
-    if title == "" then
-      title = html_attr(a.html, "a", "title")
-    end
-    -- Последний фоллбэк: весь текст ссылки
-    if title == "" then
-      title = string_trim(a.text)
-    end
-    if title == "" then title = a.href end
-    table.insert(chapters, { title = title, url = a.href })
   end
 
+  log_error("getChapterList: found " .. tostring(#chapters) .. " chapters")
   return chapters
 end
 
 -- ── Хэш для обновлений ────────────────────────────────────────────────────────
 
 function getChapterListHash(bookUrl)
-  local r = http_get(bookUrl)
-  if not r.success then return nil end
-  local el = html_select_first(r.body, ".l-chapter a.chapter-title")
-  if el then return el.href end
-  return nil
+  local body = fetchPage(bookUrl)
+  if not body then return nil end
+  local el = html_select_first(body, ".l-chapter a.chapter-title")
+  return el and el.href or nil
 end
 
 -- ── Текст главы ───────────────────────────────────────────────────────────────
@@ -186,25 +208,6 @@ function getChapterText(html)
   if not el then return "" end
   local cleaned = html_remove(el.html, "script", "style", ".ads", "h3", "h4", ".chapter-warning", ".ad-insert", "[id^=pf-]")
   return applyStandardContentTransforms(html_text(cleaned))
-end
-
--- ── Жанры книги ───────────────────────────────────────────────────────────────
-
-function getBookGenres(bookUrl)
-  local r = http_get(bookUrl)
-  if not r.success then return {} end
-  local genres = {}
-  for _, li in ipairs(html_select(r.body, "ul.info.info-meta li, ul.info-meta li")) do
-    local h3 = html_select_first(li.html, "h3")
-    if h3 and string_trim(h3.text) == "Genre:" then
-      for _, a in ipairs(html_select(li.html, "a")) do
-        local g = string_trim(a.text)
-        if g ~= "" then table.insert(genres, g) end
-      end
-      break
-    end
-  end
-  return genres
 end
 
 -- ── Список фильтров ───────────────────────────────────────────────────────────
