@@ -1,7 +1,7 @@
 ﻿-- ── Метаданные ───────────────────────────────────────────────────────────────
 id = "wtrlab"
 name = "WTR-LAB"
-version = "1.1.2"
+version = "1.1.3"
 baseUrl = "https://wtr-lab.com/"
 language = "MTL"
 icon = "https://raw.githubusercontent.com/HnDK0/external-sources/main/icons/wtr-lab.png"
@@ -141,23 +141,15 @@ function getBookGenres(bookUrl)
     if not body then
         return {}
     end
+
     local genres = {}
-    for _, block in ipairs(html_select(body, "div.items-center.text-center")) do
-        if not block.text:find("Chapters") and not block.text:find("Status") and not block.text:find("Views") and
-            not block.text:find("Rating") and not block.text:find("Readers") and not block.text:find("Chars") then
-            local label = string_trim(block.text)
-            if label ~= "" then
-                table.insert(genres, label)
-            end
-        end
-    end
-    -- жанры в flex-wrapspan без data-slot
-    for _, el in ipairs(html_select(body, "span.border-border\\/70")) do
+    for _, el in ipairs(html_select(body, "a[href*='novel-list?genre='] span")) do
         local label = string_trim(el.text)
         if label ~= "" then
             table.insert(genres, label)
         end
     end
+
     return genres
 end
 
