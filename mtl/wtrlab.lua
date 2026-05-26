@@ -136,22 +136,6 @@ function getBookCoverImageUrl(bookUrl)
     return nil
 end
 
-function getBookGenres(bookUrl)
-    local body = fetchPage(bookUrl)
-    if not body then
-        return {}
-    end
-
-    local genres = {}
-    for _, el in ipairs(html_select(body, "a[href*='novel-list?genre='] span")) do
-        local label = string_trim(el.text)
-        if label ~= "" then
-            table.insert(genres, label)
-        end
-    end
-
-    return genres
-end
 
 function getBookDescription(bookUrl)
     local body = fetchPage(bookUrl)
@@ -559,13 +543,9 @@ function getBookGenres(bookUrl)
     end
 
     local genres = {}
-    local seen = {}
-
-    -- Спаны с жанрами/тегами внутри flex-wrap контейнера
-    for _, el in ipairs(html_select(body, "div.flex.flex-wrap span")) do
+    for _, el in ipairs(html_select(body, "a[href*='novel-list?genre='] span")) do
         local label = string_trim(el.text)
-        if label ~= "" and not seen[label] then
-            seen[label] = true
+        if label ~= "" then
             table.insert(genres, label)
         end
     end
