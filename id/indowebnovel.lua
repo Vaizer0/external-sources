@@ -1,7 +1,7 @@
 -- ── Метаданные ────────────────────────────────────────────────────────────────
 id       = "indowebnovel"
 name     = "Indowebnovel"
-version  = "1.0.0"
+version  = "1.0.1"
 baseUrl  = "https://indowebnovel.id/"
 language = "id"
 icon     = "https://raw.githubusercontent.com/HnDK0/external-sources/main/icons/indowebnovel.png"
@@ -45,18 +45,23 @@ end
 
 local function parseCatalogItems(body)
   local items = {}
-  for _, a in ipairs(html_select(body, ".listupd .maindet .mdthumb a")) do
-    local bookUrl = absUrl(a.href)
-    local title   = html_attr(a.html, "img", "title")
-    if title == "" then title = html_attr(a.html, "img", "alt") end
-    local cover   = html_attr(a.html, "img", "src")
-    if cover == "" then cover = html_attr(a.html, "img", "data-src") end
-    if bookUrl ~= "" and title ~= "" then
-      table.insert(items, {
-        title = string_clean(title),
-        url   = bookUrl,
-        cover = absUrl(cover)
-      })
+  for _, el in ipairs(html_select(body, ".flexbox2-content")) do
+    local a = html_select_first(el.html, "a[title]")
+    if a then
+      local bookUrl = absUrl(a.href)
+      local title   = a.title
+      if title == "" then
+        local titleEl = html_select_first(a.html, ".flexbox2-title span:first-child")
+        if titleEl then title = titleEl.text end
+      end
+      local cover   = html_attr(el.html, ".flexbox2-thumb img", "src")
+      if bookUrl ~= "" and title ~= "" then
+        table.insert(items, {
+          title = string_clean(title),
+          url   = bookUrl,
+          cover = absUrl(cover)
+        })
+      end
     end
   end
   return items
