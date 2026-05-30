@@ -273,27 +273,23 @@ function getFilterList()
                 { value = "drama",            label = "Drama"            },
                 { value = "eastern",          label = "Eastern"          },
                 { value = "fantasy",          label = "Fantasy"          },
-                { value = "harem",            label = "Harem"            },
+                { value = "game",             label = "Game"             },
                 { value = "historical",       label = "Historical"       },
                 { value = "horror",           label = "Horror"           },
                 { value = "josei",            label = "Josei"            },
                 { value = "martial-arts",     label = "Martial Arts"     },
-                { value = "mature",           label = "Mature"           },
                 { value = "mystery",          label = "Mystery"          },
                 { value = "psychological",    label = "Psychological"    },
                 { value = "romance",          label = "Romance"          },
                 { value = "school-life",      label = "School Life"      },
                 { value = "sci-fi",           label = "Sci-fi"           },
-                { value = "seinen",           label = "Seinen"           },
-            { value = "shoujo",           label = "Shoujo"           },
-            { value = "slice-of-life",    label = "Slice of Life"    },
-            { value = "smut",             label = "Smut"             },
-            { value = "supernatural",     label = "Supernatural"     },
-            { value = "tragedy",          label = "Tragedy"          },
-            { value = "urban",            label = "Urban"            },
-            { value = "wuxia",            label = "Wuxia"            },
-            { value = "xianxia",          label = "Xianxia"          },
-            { value = "xuanhuan",         label = "Xuanhuan"         },
+                { value = "shounen",          label = "Shounen"          },
+                { value = "slice-of-life",    label = "Slice of Life"    },
+                { value = "supernatural",     label = "Supernatural"     },
+                { value = "urban",            label = "Urban"            },
+                { value = "wuxia",            label = "Wuxia"            },
+                { value = "xianxia",          label = "Xianxia"          },
+                { value = "xuanhuan",         label = "Xuanhuan"         },
             }
         },
         {
@@ -352,6 +348,7 @@ function getCatalogFiltered(index, filters)
     local op      = filters["op"] or ""
     local adult   = filters["adult"] or ""
     local author  = filters["author"] or ""
+    local artist  = filters["artist"] or ""
     local release = filters["release"] or ""
     local genres  = filters["genre_included"] or {}
     local statuses = filters["status_included"] or {}
@@ -367,6 +364,9 @@ function getCatalogFiltered(index, filters)
 
     if author ~= "" then
         url = url .. "&author=" .. url_encode(author)
+    end
+    if artist ~= "" then
+        url = url .. "&artist=" .. url_encode(artist)
     end
     if release ~= "" then
         url = url .. "&release=" .. url_encode(release)
