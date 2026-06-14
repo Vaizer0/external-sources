@@ -1,7 +1,7 @@
 ﻿-- ── Метаданные ────────────────────────────────────────────────────────────────
 id        = "NovelBin"
 name      = "Novel Bin"
-version   = "1.1.0"
+version   = "1.1.1"
 baseUrl   = "https://novelbin.com/"
 language  = "en"
 icon      = "https://raw.githubusercontent.com/HnDK0/external-sources/main/icons/novelbin.png"
@@ -73,6 +73,60 @@ local function parseCatalogItems(body, useDataSrc)
   return items
 end
 
+-- ── Извлечение novelId из страницы книги (для AJAX) ──────────────────────────
+
+local function extractNovelId(body, bookUrl)
+  local ogUrl = html_attr(body, "meta[property='og:url']", "content")
+  if ogUrl == "" then
+    log_error("extractNovelId: no og:url meta in " .. bookUrl)
+    return nil
+  end
+  local m = regex_match(ogUrl, "([^/?#]+)/*$")
+  if not m[1] then
+    log_error("extractNovelId: cannot extract novelId from og:url=" .. ogUrl)
+    return nil
+  end
+  return m[1]
+end
+
+-- ── AJAX-запрос архива глав ───────────────────────────────────────────────────
+
+local function fetchChapterArchive(novelId, bookUrl)
+  local ajaxUrl = baseUrl:gsub("/$", "") .. "/ajax/chapter-archive?novelId=" .. novelId
+  local ar = http_get(ajaxUrl, {
+    headers = {
+      ["Referer"]          = bookUrl,
+      ["X-Requested-With"] = "XMLHttpRequest",
+    }
+  })
+  if not ar.success then
+    log_error("fetchChapterArchive: AJAX failed code=" .. tostring(ar.code))
+    return nil
+  end
+  return ar.body
+end
+
+-- ── Парсинг глав из HTML шаблона ─────────────────────────────────────────────
+
+local function parseChaptersFromArchive(archiveHtml)
+  local tmpl = html_select_first(archiveHtml, "template[data-chapter-item-template]")
+  if not tmpl then
+    log_error("parseChaptersFromArchive: template element not found")
+    return {}
+  end
+
+  local chapters = {}
+  for _, a in ipairs(html_select(tmpl.html, "a[href]")) do
+    local span  = html_select_first(a.html, "span.nchr-text")
+    local title = span and string_trim(span.text) or ""
+    if title == "" then title = string_trim(a.title or "") end
+    if title == "" then title = string_trim(a.text) end
+    if title == "" then title = a.href end
+    table.insert(chapters, { title = title, url = a.href })
+  end
+  return chapters
+end
+
 -- ── Каталог ───────────────────────────────────────────────────────────────────
 
 function getCatalogList(index)
@@ -141,66 +195,34 @@ function getBookGenres(bookUrl)
   return genres
 end
 
--- ── Список глав (AJAX) ────────────────────────────────────────────────────────
+-- ── Список глав ───────────────────────────────────────────────────────────────
+-- NovelBin отдаёт все главы одним AJAX-запросом (chapter-archive).
+-- totalPages = 1, движок при обновлении перечитывает только эту страницу.
 
-function getChapterList(bookUrl)
+function parsePage(bookUrl, page)
+  if page > 1 then
+    return { chapters = {}, totalPages = 1 }
+  end
+
   local body = fetchPage(bookUrl)
   if not body then
-    log_error("getChapterList: failed to load " .. bookUrl)
-    return {}
+    log_error("parsePage: failed to load " .. bookUrl)
+    return { chapters = {}, totalPages = 1 }
   end
 
-  local ogUrl = html_attr(body, "meta[property='og:url']", "content")
-  if ogUrl == "" then
-    log_error("getChapterList: no og:url meta")
-    return {}
+  local novelId = extractNovelId(body, bookUrl)
+  if not novelId then
+    return { chapters = {}, totalPages = 1 }
   end
 
-  local m = regex_match(ogUrl, "([^/?#]+)/*$")
-  if not m[1] then
-    log_error("getChapterList: cannot extract novelId from " .. ogUrl)
-    return {}
+  local archiveHtml = fetchChapterArchive(novelId, bookUrl)
+  if not archiveHtml then
+    return { chapters = {}, totalPages = 1 }
   end
 
-  local ajaxUrl = baseUrl:gsub("/$", "") .. "/ajax/chapter-archive?novelId=" .. m[1]
-  local ar = http_get(ajaxUrl, {
-    headers = {
-      ["Referer"]          = bookUrl,
-      ["X-Requested-With"] = "XMLHttpRequest",
-    }
-  })
-  if not ar.success then
-    log_error("getChapterList: AJAX failed code=" .. tostring(ar.code))
-    return {}
-  end
-
-  -- Главы внутри <template>, берём его innerHTML напрямую
-  local tmpl = html_select_first(ar.body, "template[data-chapter-item-template]")
-  if not tmpl then
-    log_error("getChapterList: template element not found")
-    return {}
-  end
-
-  local chapters = {}
-  for _, a in ipairs(html_select(tmpl.html, "a[href]")) do
-    local span = html_select_first(a.html, "span.nchr-text")
-    local title = span and string_trim(span.text) or ""
-    if title == "" then title = string_trim(a.title or "") end
-    if title == "" then title = string_trim(a.text) end
-    if title == "" then title = a.href end
-    table.insert(chapters, { title = title, url = a.href })
-  end
-
-  log_error("getChapterList: found " .. tostring(#chapters) .. " chapters")
-  return chapters
-end
--- ── Хэш для обновлений ────────────────────────────────────────────────────────
-
-function getChapterListHash(bookUrl)
-  local r = http_get(bookUrl)
-  if not r.success then return nil end
-  local el = html_select_first(r.body, ".l-chapter a.chapter-title")
-  return el and el.href or nil
+  local chapters = parseChaptersFromArchive(archiveHtml)
+  log_error("parsePage: found " .. tostring(#chapters) .. " chapters")
+  return { chapters = chapters, totalPages = 1 }
 end
 
 -- ── Текст главы ───────────────────────────────────────────────────────────────
@@ -208,7 +230,7 @@ end
 function getChapterText(html)
   local el = html_select_first(html, "#chr-content")
   if not el then return "" end
-  local cleaned = html_remove(el.html, "script", "style", ".ads", "h3", "h4", ".chapter-warning", ".ad-insert", "[id^=pf-]")
+  local cleaned = html_remove(el.html, "script", "style", ".ads", "h3", "h4", ".chapter-warning", ".ad-insert", "[id^=pf-]", "[class*='app-promo']")
   return applyStandardContentTransforms(html_text(cleaned))
 end
 
