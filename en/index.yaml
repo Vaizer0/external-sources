@@ -21,7 +21,7 @@ sources:
     language: "en"
   - id: "NovelArrow"
     name: "Novel Arrow"
-    version: "1.0.1"
+    version: "1.0.2"
     url: "https://raw.githubusercontent.com/HnDK0/external-sources/refs/heads/main/en/novelarrow.lua"
     icon: "https://raw.githubusercontent.com/HnDK0/external-sources/main/icons/novelbin.png"
     language: "en"
