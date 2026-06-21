@@ -23,7 +23,7 @@ sources:
     name: "Novel Arrow"
     version: "1.0.2"
     url: "https://raw.githubusercontent.com/HnDK0/external-sources/refs/heads/main/en/novelarrow.lua"
-    icon: "https://raw.githubusercontent.com/HnDK0/external-sources/main/icons/novelbin.png"
+    icon: "https://raw.githubusercontent.com/HnDK0/external-sources/main/icons/novelarrow.png"
     language: "en"
   - id: "NovelBin"
     name: "Novel Bin"
