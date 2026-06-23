@@ -4,7 +4,7 @@ name     = "Local Paste (Copypaste)"
 version  = "1.0.0"
 baseUrl  = "https://localpaste.example.com"   -- valid HTTPS placeholder
 language = "en"
-icon     = ""
+icon     = "https://raw.githubusercontent.com/Vaizer0/external-sources/refs/heads/main/icons/vaizero.png"
 
 -- ── Константы ────────────────────────────────────────────────────────────────
 local STORAGE_KEY = "localpaste_chapters"
