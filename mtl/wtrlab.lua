@@ -1,7 +1,7 @@
 -- ── Метаданные ───────────────────────────────────────────────────────────────
 id = "wtrlab"
 name = "WTR-LAB"
-version = "2.0.1"
+version = "2.1.0"
 baseUrl = "https://wtr-lab.com/"
 language = "MTL"
 icon = "https://raw.githubusercontent.com/HnDK0/external-sources/main/icons/wtr-lab.png"
