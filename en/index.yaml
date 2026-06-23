@@ -81,7 +81,7 @@ sources:
     language: "en"
   - id: "truthnovel"
     name: "Truth Novel"
-    version: "1.0.7"
+    version: "1.0.8"
     url: "https://raw.githubusercontent.com/Vaizer0/external-sources/refs/heads/main/en/truthnovel.lua"
     icon: "https://truthnovel.top/wp-content/uploads/2024/02/الجديدة.jpg"
     language: "en"
