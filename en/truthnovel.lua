@@ -1,200 +1,106 @@
 id       = "truthnovel"
 name     = "Truth Novel"
-version  = "1.0.5"
+version  = "1.0.7"
 baseUrl  = "https://truthnovel.top"
 language = "en"
 icon     = "https://truthnovel.top/wp-content/uploads/2024/02/الجديدة.jpg"
 
 local function absUrl(href)
-    if not href or href == "" then
-        return ""
-    end
+if not href or href == "" then
+return ""
+end
 
-    if string_starts_with(href, "http") then
-        return href
-    end
+if href:sub(1,4) == "http" then
+    return href
+end
 
-    if string_starts_with(href, "//") then
-        return "https:" .. href
-    end
+if href:sub(1,2) == "//" then
+    return "https:" .. href
+end
 
-    return url_resolve(baseUrl, href)
+return url_resolve(baseUrl, href)
+
 end
 
 function getCatalogList(index)
-    if index > 0 then
-        return {
-            items = {},
-            hasNext = false
-        }
-    end
+if index > 0 then
+return {
+items = {},
+hasNext = false
+}
+end
 
-    return {
-        items = {
-            {
-                title = "Lord of Truth",
-                url = baseUrl .. "/list/257/",
-                cover = icon
-            }
-        },
-        hasNext = false
-    }
+return {
+    items = {
+        {
+            title = "Lord of Truth",
+            url = baseUrl .. "/list/257/",
+            cover = icon
+        }
+    },
+    hasNext = false
+}
+
 end
 
 function getCatalogSearch(index, query)
-    return getCatalogList(index)
+return getCatalogList(index)
 end
 
 function getBookTitle(bookUrl)
-    return "Lord of Truth"
+return "Lord of Truth"
 end
 
 function getBookCoverImageUrl(bookUrl)
-    return icon
+return icon
 end
 
 function getBookDescription(bookUrl)
-    return "Lord of Truth / Master of Truth"
+return "Lord of Truth / Master of Truth"
 end
 
 function getBookGenres(bookUrl)
-    return {
-        "Fantasy"
-    }
+return {
+"Fantasy"
+}
 end
 
 function getChapterList(bookUrl)
 
-    local r = http_get(bookUrl)
+local r = http_get(bookUrl)
 
-    if not r.success then
-        return {}
-    end
+if not r.success then
+    return {}
+end
 
-    local chapters = {}
+local chapters = {}
 
-    -- First selector
-    for _, a in ipairs(html_select(r.body, "a.post_title")) do
+for _, a in ipairs(html_select(r.body, "a.w4pl_post_title")) do
+    local title = string_clean(a.text)
+    local url = absUrl(a.href)
+
+    if title ~= "" and url ~= "" then
         table.insert(chapters, {
-            title = string_clean(a.text),
-            url = absUrl(a.href)
+            title = title,
+            url = url
         })
     end
+end
 
-    -- Backup selector
-    if #chapters == 0 then
-        for _, a in ipairs(html_select(r.body, "a")) do
-            if a.href and string.find(a.href, baseUrl) then
-                local t = string_clean(a.text)
+table.sort(chapters, function(a, b)
+    local na = tonumber(a.title:match("^(%d+)")) or 0
+    local nb = tonumber(b.title:match("^(%d+)")) or 0
+    return na < nb
+end)
 
-                if t ~= "" and string.match(t, "^%d+") then
-                    table.insert(chapters, {
-                        title = t,
-                        url = absUrl(a.href)
-                    })
-                end
-            end
-        end
-    end
+return chapters
 
-    return chapters
 end
 
 function getChapterListHash(bookUrl)
-    return "truthnovel-v5"
+return "truthnovel-v7"
 end
 
 function getChapterText(html, url)
-
-    local startPos =
-        string.find(
-            html,
-            '<a href=".-" class="next%-post">'
-        )
-
-    if not startPos then
-        startPos =
-            string.find(
-                html,
-                '<article class="small single">'
-            )
-    end
-
-    local endPos =
-        string.find(
-            html,
-            '<div class="post%-views'
-        )
-
-    if not endPos then
-        endPos =
-            string.find(
-                html,
-                '<div class="post%-share'
-            )
-    end
-
-    if not startPos or not endPos then
-
-        local article =
-            html:match(
-                '<article.-</article>'
-            )
-
-        if article then
-            return string_trim(
-                html_to_text(article)
-            )
-        end
-
-        return ""
-    end
-
-    local content =
-        string.sub(
-            html,
-            startPos,
-            endPos - 1
-        )
-
-    content =
-        content:gsub(
-            "<script.-</script>",
-            ""
-        )
-
-    content =
-        content:gsub(
-            "<style.-</style>",
-            ""
-        )
-
-    content =
-        content:gsub(
-            "<hr ?/?>",
-            "\n\n"
-        )
-
-    content =
-        content:gsub(
-            "<br ?/?>",
-            "\n"
-        )
-
-    content =
-        content:gsub(
-            "</p>",
-            "\n\n"
-        )
-
-    local text =
-        html_to_text(content)
-
-    text =
-        text:gsub(
-            "الموضوع التالي.-\n",
-            ""
-        )
-
-    return string_trim(text)
+return html
 end
