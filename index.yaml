@@ -1,7 +1,7 @@
 languages:
   en:
     name: "English"
-    url: "https://raw.githubusercontent.com/HnDK0/external-sources/refs/heads/main/en/index.yaml"
+    url: "https://raw.githubusercontent.com/Vaizer0/external-sources/refs/heads/main/en/index.yaml"
   fr:
     name: "Fr"
     url: "https://raw.githubusercontent.com/HnDK0/external-sources/refs/heads/main/fr/index.yaml"
