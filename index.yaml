@@ -1,6 +1,6 @@
 languages:
   en:
-    name: "English"
+    name: "En"
     url: "https://raw.githubusercontent.com/Vaizer0/external-sources/refs/heads/main/en/index.yaml"
   fr:
     name: "Fr"
