@@ -1,7 +1,7 @@
 -- ── Метаданные ───────────────────────────────────────────────────────────────
 id       = "localpaste"
 name     = "Local Paste"
-version  = "1.0.5"
+version  = "1.0.0"
 baseUrl  = "https://httpbin.org/"
 language = "en"
 icon     = "https://raw.githubusercontent.com/Vaizer0/external-sources/refs/heads/main/icons/vaizero.png"
@@ -9,7 +9,7 @@ icon     = "https://raw.githubusercontent.com/Vaizer0/external-sources/refs/head
 -- ── Константы ────────────────────────────────────────────────────────────────
 local STORAGE_KEY = "localpaste_chapters"
 local BOOK_TITLE  = "Copypaste"
-local BOOK_URL    = "https://httpbin.org/status/200?book=copypaste"
+local BOOK_URL    = "https://httpbin.org/html?book=copypaste"   -- fetches a real HTML page
 
 -- ── Вспомогательные функции ──────────────────────────────────────────────────
 
@@ -121,7 +121,7 @@ function getCatalogSearch(index, query)
     return {
         items = { {
             title = "✅ Chapter " .. newNum .. " added (" .. newNum .. " total)",
-            url   = "https://httpbin.org/status/200?chapter=" .. tostring(newNum),
+            url   = "https://httpbin.org/html?chapter=" .. tostring(newNum),
             cover = ""
         } },
         hasNext = false
@@ -155,7 +155,7 @@ function getChapterList(bookUrl)
     for i, _ in ipairs(chapters) do
         table.insert(result, {
             title = "Chapter " .. i,
-            url   = "https://httpbin.org/status/200?chapter=" .. tostring(i)
+            url   = "https://httpbin.org/html?chapter=" .. tostring(i)
         })
     end
     return result
@@ -167,13 +167,9 @@ function getChapterListHash(bookUrl)
 end
 
 function getChapterText(html, chapterUrl)
-    -- Log the URL for debugging
-    log_info("localpaste: getChapterText called with URL: " .. tostring(chapterUrl))
-
-    -- Try to extract chapter number from query parameter ?chapter=N
+    -- Extract chapter number from the query parameter "?chapter=N"
     local num = tonumber(string.match(chapterUrl, "chapter=(%d+)"))
     if not num then
-        -- Fallback: try to extract from path /chapter/N
         num = tonumber(string.match(chapterUrl, "/chapter/(%d+)"))
     end
     if not num then
