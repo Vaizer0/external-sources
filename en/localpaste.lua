@@ -1,7 +1,7 @@
 -- ── Метаданные ───────────────────────────────────────────────────────────────
 id       = "localpaste"
 name     = "Local Paste (Copypaste)"
-version  = "1.0.0"
+version  = "1.0.2"
 baseUrl  = "https://localpaste.example.com"   -- valid HTTPS placeholder
 language = "en"
 icon     = "https://raw.githubusercontent.com/Vaizer0/external-sources/refs/heads/main/icons/vaizero.png"
