@@ -1,16 +1,16 @@
 -- SonicMTL plugin for NovaLa
 -- Source: https://www.sonicmtl.com/
--- Version: 1.6.0
+-- Version: 1.6.1
 
 id       = "sonicmtl"
 name     = "Sonic MTL"
-version  = "1.6.0"
+version  = "1.6.1"
 baseUrl  = "https://www.sonicmtl.com"
 language = "mtl"
 icon     = "https://www.sonicmtl.com/wp-content/uploads/2021/09/sonicmtl-icon-1.png"
 charset  = "UTF-8"
 
--- ── Helpers ──────────────────────────────────────────────────────────────
+local _pageCache = {}
 
 local function absUrl(href)
     if not href or href == "" then return "" end
@@ -26,8 +26,6 @@ local function cleanText(text)
     text = text:gsub("\n%s*\n%s*\n+", "\n\n")
     return string_trim(text)
 end
-
-local _pageCache = {}
 
 local function fetchPage(url)
     if _pageCache[url] then return _pageCache[url] end
@@ -156,7 +154,6 @@ local function parseChapterLinks(body, novelSlug)
         end
     end
 
-    -- Sort numerically by chapter number (extracted from title or URL)
     local numbered = {}
     for _, ch in ipairs(chapters) do
         local n = tonumber((ch.title or ""):match("^(%d+)")) or
@@ -183,45 +180,66 @@ local function parseChapterLinks(body, novelSlug)
     return sorted
 end
 
--- ── AJAX chapter fetching with pagination ─────────────────────────────
+-- ── AJAX chapter fetching (handles both HTML and JSON) ────────────────
 
-local function getTotalPagesFromHtml(html)
-    local pagination = html_select_first(html, ".pagination, .page-numbers")
-    if pagination then
-        local last = html_select_first(pagination.html, "a:last-child, span:last-child")
-        if last then
-            local num = tonumber(string_trim(last.text))
-            if num then return num end
-        end
-        local max = 1
-        for _, el in ipairs(html_select(pagination.html, "a, span")) do
-            local n = tonumber(string_trim(el.text))
-            if n and n > max then max = n end
-        end
-        if max > 1 then return max end
-    end
-    return 1
-end
-
-local function fetchAjaxPage(bookUrl, mangaId, page)
+local function fetchAjaxChapters(bookUrl, mangaId)
     local novelSlug = bookUrl:match("/novel/([^/]+)/")
+
+    -- Attempt multiple endpoints (order matters)
     local attempts = {
         {
-            url = bookUrl:gsub("/?$", "") .. "/ajax/chapters/?t=1&page=" .. page,
-            post = false
+            url = bookUrl:gsub("/?$", "") .. "/ajax/chapters/?t=1",
+            body = "",
+            post = true
         },
         {
-            url = bookUrl:gsub("/?$", "") .. "/ajax/chapters/?page=" .. page,
-            post = false
-        },
-        {
-            url = baseUrl .. "/wp-admin/admin-ajax.php",
-            body = "action=wp-manga-get-chapters&manga_id=" .. mangaId .. "&paged=" .. page,
+            url = bookUrl:gsub("/?$", "") .. "/ajax/chapters/",
+            body = "",
             post = true
         },
         {
             url = baseUrl .. "/wp-admin/admin-ajax.php",
-            body = "action=wp-manga-get-chapters&post_id=" .. mangaId .. "&paged=" .. page,
+            body = "action=wp-manga-get-chapters&post_id=" .. tostring(mangaId),
+            post = true
+        },
+        {
+            url = baseUrl .. "/wp-admin/admin-ajax.php",
+            body = "action=wp-manga-get-chapters&manga_id=" .. tostring(mangaId),
+            post = true
+        },
+        {
+            url = baseUrl .. "/wp-admin/admin-ajax.php",
+            body = "action=wp-manga-get-chapters&manga=" .. tostring(mangaId),
+            post = true
+        },
+        {
+            url = baseUrl .. "/wp-admin/admin-ajax.php",
+            body = "action=manga_get_chapters&post_id=" .. tostring(mangaId),
+            post = true
+        },
+        {
+            url = baseUrl .. "/wp-admin/admin-ajax.php",
+            body = "action=manga_get_chapters&manga_id=" .. tostring(mangaId),
+            post = true
+        },
+        {
+            url = baseUrl .. "/wp-admin/admin-ajax.php",
+            body = "action=manga_get_chapters&manga=" .. tostring(mangaId),
+            post = true
+        },
+        {
+            url = baseUrl .. "/wp-admin/admin-ajax.php",
+            body = "action=madara_load_chapters&post_id=" .. tostring(mangaId),
+            post = true
+        },
+        {
+            url = baseUrl .. "/wp-admin/admin-ajax.php",
+            body = "action=madara_load_chapters&manga_id=" .. tostring(mangaId),
+            post = true
+        },
+        {
+            url = baseUrl .. "/wp-admin/admin-ajax.php",
+            body = "action=madara_load_chapters&manga=" .. tostring(mangaId),
             post = true
         },
     }
@@ -247,36 +265,31 @@ local function fetchAjaxPage(bookUrl, mangaId, page)
         end
 
         if r and r.success and r.body and r.body ~= "" then
-            local chapters = parseChapterLinks(r.body, novelSlug)
-            if #chapters > 0 or page == 1 then
-                -- Return chapters and total pages from pagination
-                local total = getTotalPagesFromHtml(r.body)
-                return chapters, total
+            local htmlBody = r.body
+
+            -- Try to parse as JSON
+            local isJson = string.sub(htmlBody, 1, 1) == "{"
+            if isJson then
+                local data = json_parse(htmlBody)
+                if data then
+                    -- Look for HTML in common fields
+                    local content = data.data or data.html or data.content or data.chapters_html
+                    if content and content ~= "" then
+                        htmlBody = content
+                    else
+                        -- Maybe it's a direct array? unlikely, but we could fallback to treating the whole body as HTML
+                    end
+                end
+            end
+
+            local chapters = parseChapterLinks(htmlBody, novelSlug)
+            if #chapters > 0 then
+                return chapters
             end
         end
     end
 
-    return {}, 1
-end
-
-local function fetchAllChapters(bookUrl, mangaId)
-    local allChapters = {}
-    local firstChapters, totalPages = fetchAjaxPage(bookUrl, mangaId, 1)
-    for _, ch in ipairs(firstChapters) do
-        table.insert(allChapters, ch)
-    end
-
-    if totalPages > 1 then
-        for p = 2, totalPages do
-            local pageChapters, _ = fetchAjaxPage(bookUrl, mangaId, p)
-            for _, ch in ipairs(pageChapters) do
-                table.insert(allChapters, ch)
-            end
-            sleep(150) -- be gentle
-        end
-    end
-
-    return allChapters
+    return {}
 end
 
 -- ── Catalog ─────────────────────────────────────────────────────────────
@@ -365,7 +378,7 @@ function getBookGenres(bookUrl)
     return genres
 end
 
--- ── Chapter List (with pagination) ─────────────────────────────────────
+-- ── Chapter List ────────────────────────────────────────────────────────
 
 function getChapterList(bookUrl)
     local body = fetchPage(bookUrl)
@@ -383,7 +396,7 @@ function getChapterList(bookUrl)
     end
 
     if mangaId and mangaId ~= "" then
-        chapters = fetchAllChapters(bookUrl, mangaId)
+        chapters = fetchAjaxChapters(bookUrl, mangaId)
         if #chapters > 0 then
             return chapters
         end
@@ -391,8 +404,6 @@ function getChapterList(bookUrl)
 
     return {}
 end
-
--- ── Chapter hash (for updates) ────────────────────────────────────────
 
 function getChapterListHash(bookUrl)
     local chapters = getChapterList(bookUrl)
