@@ -9,7 +9,7 @@ sources:
     language: "Mtl"
   - id: "wtrlab"
     name: "WTR-LAB"
-    version: "2.0.1"
+    version: "2.1.0"
     url: "https://raw.githubusercontent.com/Vaizer0/external-sources/refs/heads/main/mtl/wtrlab.lua"
     icon: "https://raw.githubusercontent.com/HnDK0/external-sources/main/icons/wtr-lab.png"
     language: "Mtl"
