@@ -13,6 +13,13 @@ local BOOK_URL    = "https://localpaste.example.com/book/copypaste"
 
 -- ── Вспомогательные функции ──────────────────────────────────────────────────
 
+local function absUrl(href)
+    if not href or href == "" then return "" end
+    if string_starts_with(href, "http") then return href end
+    if string_starts_with(href, "//") then return "https:" .. href end
+    return url_resolve(baseUrl, href)
+end
+
 local function loadChapters()
     local json = get_preference(STORAGE_KEY)
     if json and json ~= "" then
@@ -71,7 +78,7 @@ function getCatalogList(index)
             {
                 title = BOOK_TITLE .. " (" .. count .. " chapters)",
                 url   = BOOK_URL,
-                cover = ""   -- no cover
+                cover = ""
             }
         },
         hasNext = false
@@ -105,8 +112,8 @@ function getCatalogSearch(index, query)
         end
     end
 
-    -- Add new chapter
-    local text = string.trim(query)
+    -- Add new chapter (any text that is not a delete command)
+    local text = string_trim(query)   -- ← FIXED: use string_trim (not string.trim)
     if text == "" then
         return { items = { { title = "⚠️ Empty text, nothing added", url = "", cover = "" } }, hasNext = false }
     end
@@ -126,7 +133,9 @@ function getBookTitle(bookUrl)
     return nil
 end
 
-function getBookCoverImageUrl(bookUrl) return nil end
+function getBookCoverImageUrl(bookUrl)
+    return nil
+end
 
 function getBookDescription(bookUrl)
     if bookUrl == BOOK_URL then
@@ -135,7 +144,9 @@ function getBookDescription(bookUrl)
     return nil
 end
 
-function getBookGenres(bookUrl) return {} end
+function getBookGenres(bookUrl)
+    return {}
+end
 
 function getChapterList(bookUrl)
     if bookUrl ~= BOOK_URL then return {} end
@@ -181,5 +192,10 @@ end
 
 -- ── Фильтры (не поддерживаются) ─────────────────────────────────────────────
 
-function getFilterList() return {} end
-function getCatalogFiltered(index, filters) return { items = {}, hasNext = false } end
+function getFilterList()
+    return {}
+end
+
+function getCatalogFiltered(index, filters)
+    return { items = {}, hasNext = false }
+end
