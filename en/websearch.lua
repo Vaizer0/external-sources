@@ -4,7 +4,7 @@ name     = "Web Search"
 version  = "1.0.0"
 baseUrl  = "https://www.google.com/"
 language = "EN"
-icon     = "https://raw.githubusercontent.com/HnDK0/external-sources/main/icons/websearch.png"
+icon     = "https://github.com/Vaizer0/external-sources/blob/main/icons/websearch.png?raw=true"
 charset  = "UTF-8"
 
 -- ── Настройки ────────────────────────────────────────────────────────────────
