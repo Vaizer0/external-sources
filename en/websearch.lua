@@ -3,7 +3,7 @@ id       = "websearch"
 name     = "Web Search"
 version  = "1.0.0"
 baseUrl  = "https://www.google.com/"
-language = "EN"
+language = "en"
 icon     = "https://github.com/Vaizer0/external-sources/blob/main/icons/websearch.png?raw=true"
 charset  = "UTF-8"
 
