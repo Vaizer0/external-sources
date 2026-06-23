@@ -1,6 +1,6 @@
 id       = "sonicmtl"
 name     = "Sonic MTL"
-version  = "1.4.0"
+version  = "1.5.0"
 baseUrl  = "https://www.sonicmtl.com"
 language = "mtl"
 icon     = "https://www.sonicmtl.com/wp-content/uploads/2021/09/sonicmtl-icon-1.png"
@@ -141,15 +141,16 @@ local function parseChapterLinks(body, novelSlug)
     end
 
     for _, sel in ipairs({
-        ".wp-manga-chapter a",
-        ".listing-chapters_wrap a",
+        ".listing-chapters_wrap ul.main.version-chap .wp-manga-chapter a",
         ".listing-chapters_wrap .wp-manga-chapter a",
-        ".chapters_selectbox_holder a",
+        ".listing-chapters_wrap .wp-manga-chapter",
+        ".wp-manga-chapter a",
+        ".wp-manga-chapter",
+        ".list-chapter .chapter-item .chapter a",
+        ".page-content-listing.single-page .list-chapter .chapter a",
         ".chapter-item a",
         ".chapter a",
         "a.btn-link",
-        "a[href*='/chapter']",
-        "a[href*='/novel/']",
     }) do
         for _, a in ipairs(html_select(body, sel)) do
             addChapter(a.text or "", a.href or "")
@@ -185,29 +186,19 @@ local function parseChapterLinks(body, novelSlug)
     return sorted
 end
 
+local function extractMangaId(body)
+    return html_attr(body, "#manga-chapters-holder", "data-id")
+        or body:match('"manga_id":"(%d+)"')
+        or body:match('data%-id="(%d+)"')
+end
+
 local function fetchAjaxChapters(bookUrl, mangaId)
     local novelSlug = bookUrl:match("/novel/([^/]+)/")
 
     local attempts = {
         {
-            url = bookUrl:gsub("/?$", "") .. "/ajax/chapters/?t=1",
-            body = "",
-        },
-        {
-            url = bookUrl:gsub("/?$", "") .. "/ajax/chapters/",
-            body = "",
-        },
-        {
             url = baseUrl .. "/wp-admin/admin-ajax.php",
-            body = "action=wp-manga-get-chapters&post_id=" .. tostring(mangaId),
-        },
-        {
-            url = baseUrl .. "/wp-admin/admin-ajax.php",
-            body = "action=wp-manga-get-chapters&manga_id=" .. tostring(mangaId),
-        },
-        {
-            url = baseUrl .. "/wp-admin/admin-ajax.php",
-            body = "action=wp-manga-get-chapters&manga=" .. tostring(mangaId),
+            body = "action=manga_get_chapters&manga=" .. tostring(mangaId),
         },
         {
             url = baseUrl .. "/wp-admin/admin-ajax.php",
@@ -219,7 +210,19 @@ local function fetchAjaxChapters(bookUrl, mangaId)
         },
         {
             url = baseUrl .. "/wp-admin/admin-ajax.php",
-            body = "action=manga_get_chapters&manga=" .. tostring(mangaId),
+            body = "action=wp-manga-get-chapters&manga=" .. tostring(mangaId),
+        },
+        {
+            url = baseUrl .. "/wp-admin/admin-ajax.php",
+            body = "action=wp-manga-get-chapters&post_id=" .. tostring(mangaId),
+        },
+        {
+            url = baseUrl .. "/wp-admin/admin-ajax.php",
+            body = "action=wp-manga-get-chapters&manga_id=" .. tostring(mangaId),
+        },
+        {
+            url = baseUrl .. "/wp-admin/admin-ajax.php",
+            body = "action=madara_load_chapters&manga=" .. tostring(mangaId),
         },
         {
             url = baseUrl .. "/wp-admin/admin-ajax.php",
@@ -228,10 +231,6 @@ local function fetchAjaxChapters(bookUrl, mangaId)
         {
             url = baseUrl .. "/wp-admin/admin-ajax.php",
             body = "action=madara_load_chapters&manga_id=" .. tostring(mangaId),
-        },
-        {
-            url = baseUrl .. "/wp-admin/admin-ajax.php",
-            body = "action=madara_load_chapters&manga=" .. tostring(mangaId),
         },
     }
 
@@ -382,18 +381,23 @@ function getChapterList(bookUrl)
     if not body then return {} end
 
     local novelSlug = bookUrl:match("/novel/([^/]+)/")
+
     local chapters = parseChapterLinks(body, novelSlug)
     if #chapters > 0 then
         return chapters
     end
 
-    local mangaId = html_attr(body, "#manga-chapters-holder", "data-id")
-    if not mangaId or mangaId == "" then
-        mangaId = body:match('"manga_id":"(%d+)"') or body:match('data%-id="(%d+)"')
-    end
-
+    local mangaId = extractMangaId(body)
     if mangaId and mangaId ~= "" then
         chapters = fetchAjaxChapters(bookUrl, mangaId)
+        if #chapters > 0 then
+            return chapters
+        end
+    end
+
+    local fallback = http_get(bookUrl:gsub("/?$", "") .. "/ajax/chapters/?t=1")
+    if fallback.success and fallback.body and fallback.body ~= "" then
+        chapters = parseChapterLinks(fallback.body, novelSlug)
         if #chapters > 0 then
             return chapters
         end
