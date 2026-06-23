@@ -1,7 +1,7 @@
 -- ── Метаданные ───────────────────────────────────────────────────────────────
 id       = "localpaste"
 name     = "Local Paste"
-version  = "1.0.3"
+version  = "1.0.0"
 baseUrl  = "https://example.com/"
 language = "en"
 icon     = "https://raw.githubusercontent.com/Vaizer0/external-sources/refs/heads/main/icons/vaizero.png"
@@ -167,7 +167,7 @@ function getChapterListHash(bookUrl)
 end
 
 function getChapterText(html, chapterUrl)
-    -- Extract chapter number from query parameter "?chapter=N"
+    -- Extract chapter number from the URL
     local num = tonumber(string.match(chapterUrl, "chapter=(%d+)"))
     if not num then
         num = tonumber(string.match(chapterUrl, "/chapter/(%d+)"))
