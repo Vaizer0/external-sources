@@ -6,7 +6,7 @@
 
 id       = "sonicmtl"
 name     = "Sonic MTL"
-version  = "1.6.0"
+version  = "1.0.0"
 baseUrl  = "https://www.sonicmtl.com"
 language = "mtl"          -- machine‑translated novels
 icon     = "https://www.sonicmtl.com/wp-content/uploads/2021/09/sonicmtl-icon-1.png"
