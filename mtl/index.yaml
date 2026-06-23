@@ -3,7 +3,7 @@ name: "Mtl"
 sources:
   - id: "sonicmtl"
     name: "Sonic MTL"
-    version: "1.0.1"
+    version: "1.2.0"
     url: "https://raw.githubusercontent.com/Vaizer0/external-sources/refs/heads/main/mtl/sonicmtl.lua"
     icon: "https://www.sonicmtl.com/wp-content/uploads/2021/09/sonicmtl-icon-1.png"
     language: "Mtl"
