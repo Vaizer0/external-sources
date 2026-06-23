@@ -1,6 +1,6 @@
 id       = "truthnovel"
 name     = "Truth Novel"
-version  = "1.1.0"
+version  = "1.1.1"
 baseUrl  = "https://truthnovel.top"
 language = "en"
 icon     = "https://truthnovel.top/wp-content/uploads/2024/02/الجديدة.jpg"
@@ -75,7 +75,6 @@ function getChapterList(bookUrl)
     for _, a in ipairs(html_select(r.body, "a.w4pl_post_title")) do
 
         if a.href and a.text then
-
             table.insert(chapters,{
                 title = a.text,
                 url = absUrl(a.href)
@@ -88,7 +87,6 @@ function getChapterList(bookUrl)
         for _, a in ipairs(html_select(r.body, "a.post_title")) do
 
             if a.href and a.text then
-
                 table.insert(chapters,{
                     title = a.text,
                     url = absUrl(a.href)
@@ -116,7 +114,7 @@ function getChapterList(bookUrl)
 end
 
 function getChapterListHash(bookUrl)
-    return "truthnovel-v110"
+    return "truthnovel-v111"
 end
 
 function getChapterText(html,url)
@@ -163,6 +161,7 @@ function getChapterText(html,url)
     end
 
     if not content then
+
         local el =
             html_select_first(
                 html,
@@ -196,14 +195,26 @@ function getChapterText(html,url)
 
     content =
         content:gsub(
-            '<br%s*/?>',
+            '</p>',
+            '\n\n'
+        )
+
+    content =
+        content:gsub(
+            '<br ?/?>',
             '\n'
         )
 
     content =
         content:gsub(
-            '</p>',
-            '\n\n'
+            '<br/>',
+            '\n'
+        )
+
+    content =
+        content:gsub(
+            '<br />',
+            '\n'
         )
 
     content =
@@ -245,10 +256,9 @@ function getChapterText(html,url)
         )
 
     content =
-        content:gsub(
-            '\n%s*\n%s*\n+',
-            '\n\n'
-        )
+        content:gsub("\r\n", "\n")
+        :gsub("\r", "\n")
+        :gsub("\n\n\n+", "\n\n")
 
     return content
 end
