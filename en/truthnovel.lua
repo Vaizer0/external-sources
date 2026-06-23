@@ -50,12 +50,16 @@ function getBookGenres(bookUrl)
 end
 
 function getChapterList(bookUrl)
+
     local r = http_get(bookUrl)
-    if not r.success then return {} end
+    if not r.success then
+        return {}
+    end
 
     local chapters = {}
 
-    for _, a in ipairs(html_select(r.body, "a.w4pl_post_title")) do
+    for _, a in ipairs(html_select(r.body, "a.post_title")) do
+
         local title = string_clean(a.text)
         local url = absUrl(a.href)
 
@@ -67,7 +71,7 @@ function getChapterList(bookUrl)
         end
     end
 
-    table.sort(chapters, function(a, b)
+    table.sort(chapters, function(a,b)
         local na = tonumber(a.title:match("^(%d+)")) or 0
         local nb = tonumber(b.title:match("^(%d+)")) or 0
         return na < nb
@@ -77,9 +81,43 @@ function getChapterList(bookUrl)
 end
 
 function getChapterListHash(bookUrl)
-    return "truthnovel-debug"
+    return "truthnovel-v1"
 end
 
 function getChapterText(html, url)
-    return html
+
+    html = html_remove(
+        html,
+        "script",
+        "style",
+        "nav",
+        "footer",
+        "aside",
+        ".comments-area",
+        ".comment-respond",
+        ".sidebar",
+        ".widget",
+        ".sharedaddy"
+    )
+
+    local el =
+        html_select_first(html, ".entry-content")
+        or html_select_first(html, "article .entry-content")
+        or html_select_first(html, "article")
+        or html_select_first(html, "main")
+
+    if not el then
+        return ""
+    end
+
+    local text = html_text(el.html)
+
+    text = regex_replace(text, "@context.*?Novel Stories", "")
+    text = regex_replace(text, "التعليقات.*", "")
+    text = regex_replace(text, "Leave a Reply.*", "")
+    text = regex_replace(text, "شارك.*", "")
+
+    text = string_trim(text)
+
+    return text
 end
