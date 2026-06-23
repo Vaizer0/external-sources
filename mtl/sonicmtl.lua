@@ -2,7 +2,7 @@ id       = "sonicmtl"
 name     = "Sonic MTL"
 version  = "1.0.1"
 baseUrl  = "https://www.sonicmtl.com"
-language = "en"
+language = "MTL"
 icon     = "https://www.sonicmtl.com/wp-content/uploads/2021/09/sonicmtl-icon-1.png"
 
 local function absUrl(href)
