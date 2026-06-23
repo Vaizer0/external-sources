@@ -5,7 +5,6 @@ version  = "1.0.2"
 baseUrl  = "https://www.google.com/"
 language = "en"
 icon     = "https://github.com/Vaizer0/external-sources/blob/main/icons/websearch.png?raw=true"
-charset  = "UTF-8"
 
 -- ── Настройки ────────────────────────────────────────────────────────────────
 local PREF_ENGINE = "websearch_engine"
@@ -22,6 +21,34 @@ local function absUrl(href, base)
     if string_starts_with(href, "http") then return href end
     if string_starts_with(href, "//") then return "https:" .. href end
     return url_resolve(base or baseUrl, href)
+end
+
+-- Extract real URL from DuckDuckGo redirect link
+local function extractDuckDuckGoUrl(link)
+    if not link or link == "" then return "" end
+    
+    -- Check if it's a DuckDuckGo redirect link
+    if string.find(link, "/l/?") or string.find(link, "uddg=") then
+        -- Extract the uddg parameter value
+        local realUrl = string.match(link, "uddg=([^&]+)")
+        if realUrl then
+            -- URL-decode the extracted value
+            realUrl = url_decode(realUrl)
+            -- Also handle double-encoding
+            if string.find(realUrl, "%%") then
+                realUrl = url_decode(realUrl)
+            end
+            return realUrl
+        end
+    end
+    
+    -- If it's a direct link starting with http, return as-is
+    if string_starts_with(link, "http") then
+        return link
+    end
+    
+    -- Otherwise try to resolve it
+    return absUrl(link, "https://html.duckduckgo.com")
 end
 
 local function http_get_retry(url, config, retries)
@@ -85,25 +112,35 @@ function getCatalogSearch(index, query)
     local items = {}
 
     if engine == "google" then
-        local blocks = html_select(html, "div.g, div[data-sokoban-container], div[class*='yuRUbf']")
+        -- Try multiple selectors for Google result blocks
+        local blocks = html_select(html, "div.g, div[data-sokoban-container], div[class*='yuRUbf'], div[class*='tF2Cxc']")
         for _, block in ipairs(blocks) do
             local titleEl = html_select_first(block.html, "a[href^='/url?'], a[href^='http']")
             if titleEl then
-                local title = html_select_first(block.html, "h3, h2, h1, div[role='heading']")
+                -- Try multiple ways to get the title
+                local title = html_select_first(block.html, "h3, h2, h1, div[role='heading'], div[class*='LC20lb']")
                 if title then
                     title = string_clean(title.text)
                 else
                     title = string_clean(titleEl.text) or "Untitled"
                 end
+                
                 local link = titleEl.href
                 local realUrl
+                
                 if string_starts_with(link, "/url?") then
                     realUrl = string.match(link, "q=([^&]+)")
-                    if realUrl then realUrl = url_decode(realUrl) end
+                    if realUrl then 
+                        realUrl = url_decode(realUrl) 
+                    end
                 else
                     realUrl = absUrl(link, "https://www.google.com")
                 end
-                if realUrl and realUrl ~= "" then
+                
+                -- Filter out Google's own internal links
+                if realUrl and realUrl ~= "" and 
+                   not string.find(realUrl, "google.com") and
+                   not string.find(realUrl, "youtube.com") then
                     table.insert(items, {
                         title = title,
                         url   = realUrl,
@@ -113,17 +150,42 @@ function getCatalogSearch(index, query)
             end
         end
     elseif engine == "duckduckgo" then
+        -- DuckDuckGo: look for result links
         for _, a in ipairs(html_select(html, "a.result__a")) do
             local title = string_clean(a.text)
             local link = a.href
+            
             if link and title ~= "" then
-                local fullUrl = absUrl(link, "https://html.duckduckgo.com")
-                if fullUrl ~= "" then
+                -- Extract the real URL from DuckDuckGo's redirect
+                local realUrl = extractDuckDuckGoUrl(link)
+                
+                -- Filter out DuckDuckGo's own pages
+                if realUrl and realUrl ~= "" and 
+                   not string.find(realUrl, "duckduckgo.com") then
                     table.insert(items, {
                         title = title,
-                        url   = fullUrl,
+                        url   = realUrl,
                         cover = ""
                     })
+                end
+            end
+        end
+        
+        -- Fallback: also try other link selectors if the above didn't work
+        if #items == 0 then
+            for _, a in ipairs(html_select(html, "a[href*='uddg=']")) do
+                local title = string_clean(a.text)
+                local link = a.href
+                if link and title ~= "" then
+                    local realUrl = extractDuckDuckGoUrl(link)
+                    if realUrl and realUrl ~= "" and 
+                       not string.find(realUrl, "duckduckgo.com") then
+                        table.insert(items, {
+                            title = title,
+                            url   = realUrl,
+                            cover = ""
+                        })
+                    end
                 end
             end
         end
