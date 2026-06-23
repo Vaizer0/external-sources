@@ -1,7 +1,7 @@
 -- ── Метаданные ───────────────────────────────────────────────────────────────
 id = "wtrlab"
 name = "WTR-LAB"
-version = "2.1.0"
+version = "2.0.2"
 baseUrl = "https://wtr-lab.com/"
 language = "MTL"
 icon = "https://raw.githubusercontent.com/HnDK0/external-sources/main/icons/wtr-lab.png"
@@ -11,6 +11,7 @@ local PREF_MODE = "wtrlab_mode" -- "ai" | "raw" | "web" | "webplus"
 
 -- Кеш страниц: один запрос на URL, живёт до перезапуска приложения
 local _pageCache = {}
+local _cookieJar = {}  -- store cookies from HTML fetches
 
 local function fetchPage(url)
     if _pageCache[url] then
@@ -26,6 +27,10 @@ local function fetchPage(url)
     })
     if r.success then
         _pageCache[url] = r.body
+        -- store any cookies sent in response (if accessible)
+        if r.headers and r.headers["set-cookie"] then
+            _cookieJar[url] = r.headers["set-cookie"]
+        end
     end
     return r.success and r.body or nil
 end
@@ -230,7 +235,6 @@ function getChapterList(bookUrl)
         local order = ch.order or i
         local title = ch.title or ("Chapter " .. tostring(order))
         local chUrl = baseUrl .. "novel/" .. novelId .. "/" .. slug .. "/chapter-" .. tostring(order)
-        -- For web/webplus modes, append service parameter to URL (page will be fetched directly)
         if mode == "web" or mode == "webplus" then
             chUrl = chUrl .. "?service=" .. mode
         end
@@ -256,17 +260,12 @@ end
 
 -- Parse chapter text from HTML page (for web/webplus modes)
 local function parseChapterFromHtml(html)
-    -- Remove unwanted elements
     local cleaned = html_remove(html, "script", "style", "noscript", "svg", "nav", "footer", ".ads", ".advertisement")
-    
-    -- Try multiple possible containers
     local el = html_select_first(cleaned, ".chapter-content, .reader-content, .content, main, article")
     if not el then
-        -- Fallback: try to find text in the entire body
         local body = html_select_first(cleaned, "body")
         if body then
             local text = body.text
-            -- Try to extract only the chapter text by looking for common patterns
             local start = text:find("Chapter %d+") or text:find("Ch%.? %d+") or 1
             if start then
                 text = text:sub(start)
@@ -275,16 +274,11 @@ local function parseChapterFromHtml(html)
         end
         return ""
     end
-    
-    -- Get text with paragraph structure preserved
     local text = html_text(el.html)
-    
-    -- Clean up the text
     text = string_normalize(text)
     text = regex_replace(text, "(?i)^\\s*(Translator|Editor|Proofreader|Read\\s+(at|on|latest))[:\\s][^\\n\\r]{0,70}(\\r?\\n|$)", "")
     text = regex_replace(text, "(?i)\\A[\\s\\uFEFF]*((Глава\\s+\\d+|Chapter\\s+\\d+)[^\\n\\r]*[\\n\\r\\s]*)+", "")
     text = string_trim(text)
-    
     return text
 end
 
@@ -387,7 +381,6 @@ function getChapterText(html, chapterUrl)
     if mode == "web" or mode == "webplus" then
         log_info("wtrlab: fetching chapter page for mode=" .. mode)
         
-        -- Ensure the URL has the service parameter (should already have it from getChapterList)
         local fetchUrl = chapterUrl
         if not fetchUrl:find("service=") then
             fetchUrl = fetchUrl .. (fetchUrl:find("?") and "&" or "?") .. "service=" .. mode
@@ -400,18 +393,63 @@ function getChapterText(html, chapterUrl)
                 log_info("wtrlab: successfully parsed " .. tostring(#text) .. " chars from HTML")
                 return text
             else
-                log_error("wtrlab: failed to parse chapter from HTML, trying API fallback for web mode")
-                -- Fallback: try to get the raw/ai translation via API (but this may fail due to login)
-                -- We'll try to use the AI API to get some text, but warn the user.
-                -- Actually, we'll attempt to get the raw text using translate="web", language="zh"
-                -- and then apply nothing. This might return Chinese text, but it's better than nothing.
-                -- We'll do this as a last resort.
-                mode = "raw" -- force raw for fallback
+                log_error("wtrlab: HTML parsing returned empty, falling back to API for web mode")
             end
         else
             log_error("wtrlab: failed to fetch chapter page for " .. fetchUrl)
-            mode = "raw" -- fallback to raw
         end
+
+        -- Fallback: try API with translate="web" and language="en" (or "none")
+        -- This may require login (error 1401)
+        log_info("wtrlab: attempting API fallback for web/webplus mode")
+        local novelId = string.match(chapterUrl, "/novel/(%d+)/")
+        if novelId then
+            local chapterNo = tonumber(string.match(chapterUrl, "/chapter%-(%d+)")) or 1
+            local requestBody = json_stringify({
+                translate = "web",
+                language = "en",   -- or "none"?
+                raw_id = novelId,
+                chapter_no = chapterNo,
+                retry = false,
+                force_retry = false
+            })
+            -- Add cookies from previous HTML fetch if available
+            local headers = {
+                ["Content-Type"] = "application/json",
+                ["Referer"] = chapterUrl,
+                ["Origin"] = regex_replace(baseUrl, "/$", "")
+            }
+            -- If we have a cookie from the HTML fetch, add it
+            if _cookieJar[fetchUrl] then
+                headers["Cookie"] = _cookieJar[fetchUrl]
+            end
+            local r = http_post_retry(baseUrl .. "api/reader/get", requestBody, { headers = headers }, 3)
+            if r.success then
+                local json = json_parse(r.body)
+                if json and json.success ~= false then
+                    local data = json.data and json.data.data or json.data
+                    if data and data.body then
+                        local rawBody = type(data.body) == "table" and json_stringify(data.body) or tostring(data.body)
+                        local resolvedBody = decryptBody(rawBody, "https://wtr-lab-proxy.fly.dev/chapter")
+                        local paragraphs = buildParagraphs(resolvedBody, nil, nil) -- no glossary for web
+                        if #paragraphs > 0 then
+                            log_info("wtrlab: API fallback returned " .. tostring(#paragraphs) .. " paragraphs")
+                            return table.concat(paragraphs, "\n\n")
+                        end
+                    end
+                elseif json and json.code == 1401 then
+                    return "[1401] You are not logged in! Web/Web+ modes require login."
+                end
+            else
+                log_error("wtrlab: API fallback failed with code " .. tostring(r.code))
+                if r.code == 1401 then
+                    return "[1401] You are not logged in! Web/Web+ modes require login."
+                end
+            end
+        end
+        -- If all fails, fallback to raw (Chinese) as last resort
+        log_error("wtrlab: all fallbacks for web/webplus failed, falling back to raw")
+        mode = "raw"  -- force raw processing
     end
 
     -- ── RAW and AI modes (or fallback from web) ────────────────────────────
@@ -426,24 +464,15 @@ function getChapterText(html, chapterUrl)
 
         local chapterNo = tonumber(string.match(chapterUrl, "/chapter%-(%d+)")) or 1
 
-        -- Map mode to API parameters
-        local translateParam
-        local languageParam
-        local applyGlossary = false
-
+        local translateParam, languageParam, applyGlossary
         if mode == "raw" then
             translateParam = "web"
             languageParam = "zh"
             applyGlossary = false
-        elseif mode == "ai" then
+        else -- ai
             translateParam = "ai"
             languageParam = "none"
             applyGlossary = true
-        else
-            -- Fallback for unknown modes
-            translateParam = "ai"
-            languageParam = "none"
-            applyGlossary = false
         end
 
         log_info("wtrlab: novelId=" .. novelId .. " chapterNo=" .. tostring(chapterNo) ..
@@ -481,6 +510,9 @@ function getChapterText(html, chapterUrl)
             local errCode = json.code or "?"
             local errMsg = json.error or "Unknown API error"
             log_error("wtrlab: API error [" .. tostring(errCode) .. "]: " .. errMsg)
+            if errCode == 1401 then
+                return "[1401] You are not logged in! This mode requires login."
+            end
             error("[" .. tostring(errCode) .. "] " .. errMsg)
         end
 
@@ -512,17 +544,14 @@ function getChapterText(html, chapterUrl)
             return ""
         end
 
-        -- Proxy decryption for AI mode (and also raw if encrypted)
         local proxyUrl = "https://wtr-lab-proxy.fly.dev/chapter"
         local resolvedBody = decryptBody(rawBody, proxyUrl)
 
-        -- ── Load glossary only for AI mode ──────────────────────────────────────
         local termByOriginal = {}
         local glossary = {}
         local patches = {}
 
         if applyGlossary then
-            -- Load v2 glossary
             local cache = termCache and termCache[novelId]
             if cache then
                 termByOriginal = cache.termByOriginal
@@ -567,7 +596,6 @@ function getChapterText(html, chapterUrl)
                 end
             end
 
-            -- Build chapter glossary
             if data.glossary_data and data.glossary_data.terms then
                 local terms = data.glossary_data.terms
                 log_info("wtrlab: glossary terms count=" .. tostring(#terms))
@@ -586,7 +614,6 @@ function getChapterText(html, chapterUrl)
                 end
             end
 
-            -- Build patches
             if data.patch then
                 log_info("wtrlab: patches count=" .. tostring(#data.patch))
                 for _, patchItem in ipairs(data.patch) do
@@ -612,7 +639,6 @@ function getChapterText(html, chapterUrl)
     return ""
 end
 
--- termCache needs to be declared for the glossary logic above
 local termCache = {}
 
 -- ── Settings schema ───────────────────────────────────────────────────────────
@@ -1127,7 +1153,6 @@ function getCatalogFiltered(index, filters)
     local tags_inc = filters["tags_included"] or {}
     local tags_exc = filters["tags_excluded"] or {}
 
-    -- WTR-LAB uses _next/data API — need buildId from novel-finder page
     local finderUrl = baseUrl .. "en/novel-finder"
     local fr = http_get_retry(finderUrl, nil, 2)
     if not fr.success then
