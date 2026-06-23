@@ -87,7 +87,7 @@ sources:
     language: "en"
   - id: "websearch"
     name: "Web Search"
-    version: "1.0.1"
+    version: "1.0.2"
     url: "https://raw.githubusercontent.com/Vaizer0/external-sources/refs/heads/main/en/websearch.lua"
     icon: "https://github.com/Vaizer0/external-sources/blob/main/icons/websearch.png?raw=true"
     language: "en"
