@@ -1,24 +1,17 @@
 -- ── Метаданные ───────────────────────────────────────────────────────────────
 id       = "localpaste"
 name     = "Local Paste"
-version  = "1.0.2"
-baseUrl  = "https://httpbin.org/"
+version  = "1.0.0"
+baseUrl  = "https://example.com/"
 language = "en"
 icon     = "https://raw.githubusercontent.com/Vaizer0/external-sources/refs/heads/main/icons/vaizero.png"
 
 -- ── Константы ────────────────────────────────────────────────────────────────
 local STORAGE_KEY = "localpaste_chapters"
 local BOOK_TITLE  = "Copypaste"
-local BOOK_URL    = "https://httpbin.org/html?book=copypaste"   -- always returns a sample HTML page
+local BOOK_URL    = "https://example.com/?book=copypaste"
 
 -- ── Вспомогательные функции ──────────────────────────────────────────────────
-
-local function absUrl(href)
-    if not href or href == "" then return "" end
-    if string_starts_with(href, "http") then return href end
-    if string_starts_with(href, "//") then return "https:" .. href end
-    return url_resolve(baseUrl, href)
-end
 
 local function loadChapters()
     local json = get_preference(STORAGE_KEY)
@@ -121,7 +114,7 @@ function getCatalogSearch(index, query)
     return {
         items = { {
             title = "✅ Chapter " .. newNum .. " added (" .. newNum .. " total)",
-            url   = "https://httpbin.org/html?chapter=" .. tostring(newNum),
+            url   = "https://example.com/?chapter=" .. tostring(newNum),
             cover = ""
         } },
         hasNext = false
@@ -155,7 +148,7 @@ function getChapterList(bookUrl)
     for i, _ in ipairs(chapters) do
         table.insert(result, {
             title = "Chapter " .. i,
-            url   = "https://httpbin.org/html?chapter=" .. tostring(i)
+            url   = "https://example.com/?chapter=" .. tostring(i)
         })
     end
     return result
@@ -167,7 +160,6 @@ function getChapterListHash(bookUrl)
 end
 
 function getChapterText(html, chapterUrl)
-    -- Extract chapter number from the URL
     local num = tonumber(string.match(chapterUrl, "chapter=(%d+)"))
     if not num then
         num = tonumber(string.match(chapterUrl, "/chapter/(%d+)"))
