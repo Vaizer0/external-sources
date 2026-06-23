@@ -1,6 +1,6 @@
 id       = "truthnovel"
 name     = "Truth Novel"
-version  = "1.1.1"
+version  = "1.0.0"
 baseUrl  = "https://truthnovel.top"
 language = "en"
 icon     = "https://truthnovel.top/wp-content/uploads/2024/02/الجديدة.jpg"
