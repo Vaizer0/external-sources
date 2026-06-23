@@ -1,6 +1,6 @@
 id       = "sonicmtl"
 name     = "Sonic MTL"
-version  = "1.2.0"
+version  = "1.0.0"
 baseUrl  = "https://www.sonicmtl.com"
 language = "mtl"
 icon     = "https://www.sonicmtl.com/wp-content/uploads/2021/09/sonicmtl-icon-1.png"
@@ -26,7 +26,6 @@ local function fetchPage(url)
     if _pageCache[url] then
         return _pageCache[url]
     end
-
     local r = http_get(url)
     if r.success then
         _pageCache[url] = r.body
@@ -39,6 +38,7 @@ local function parseCard(cardHtml)
     local titleEl =
         html_select_first(cardHtml, ".item-summary .post-title a")
         or html_select_first(cardHtml, ".post-title a")
+        or html_select_first(cardHtml, "h3 a")
         or html_select_first(cardHtml, "a[title]")
 
     local linkEl =
@@ -61,6 +61,9 @@ local function parseCard(cardHtml)
     if cover == "" then
         cover = html_attr(cardHtml, "img", "data-src")
     end
+    if cover == "" then
+        cover = html_attr(cardHtml, "img", "data-lazy-src")
+    end
 
     return {
         title = title,
@@ -77,7 +80,7 @@ local function parseCatalogItems(body)
         ".page-item-detail",
         ".page-listing-item .page-item-detail",
         ".c-tabs-item__content",
-        ".slider__item",
+        ".item-summary",
         ".popular-item-wrap",
     }
 
@@ -125,7 +128,7 @@ local function parseChapterLinks(body, novelSlug)
             return
         end
 
-        if not href:find("/chapter") and not href:find("chapter%-") and not href:find("/chapter%-") then
+        if not href:find("/chapter") and not href:find("chapter%-") then
             return
         end
 
@@ -136,16 +139,15 @@ local function parseChapterLinks(body, novelSlug)
         })
     end
 
-    local selectors = {
+    for _, sel in ipairs({
         ".wp-manga-chapter a",
         ".listing-chapters_wrap a",
         ".listing-chapters_wrap .wp-manga-chapter a",
+        ".chapters_selectbox_holder a",
         ".chapter-item a",
         ".chapter a",
-        "a.btn-link"
-    }
-
-    for _, sel in ipairs(selectors) do
+        "a.btn-link",
+    }) do
         for _, a in ipairs(html_select(body, sel)) do
             addChapter(a.text or "", a.href or "")
         end
@@ -166,9 +168,26 @@ local function parseChapterLinks(body, novelSlug)
     return chapters
 end
 
-local function fetchChaptersFromAjax(bookUrl, mangaId)
-    local ajaxUrl = baseUrl .. "/wp-admin/admin-ajax.php"
-    local attempts = {
+local function fetchChaptersAjax(bookUrl, mangaId)
+    local ajaxUrl = bookUrl:gsub("/?$", "") .. "/ajax/chapters/?t=1"
+
+    local r = http_post(ajaxUrl, "", {
+        headers = {
+            ["X-Requested-With"] = "XMLHttpRequest",
+            ["Referer"] = bookUrl,
+            ["Origin"] = baseUrl
+        }
+    })
+
+    if r.success and r.body and r.body ~= "" then
+        local chapters = parseChapterLinks(r.body, bookUrl:match("/novel/([^/]+)/"))
+        if #chapters > 0 then
+            return chapters
+        end
+    end
+
+    local ajaxUrl2 = baseUrl .. "/wp-admin/admin-ajax.php"
+    local bodies = {
         "action=wp-manga-get-chapters&post_id=" .. tostring(mangaId),
         "action=wp-manga-get-chapters&manga_id=" .. tostring(mangaId),
         "action=wp-manga-get-chapters&manga=" .. tostring(mangaId),
@@ -180,8 +199,8 @@ local function fetchChaptersFromAjax(bookUrl, mangaId)
         "action=madara_load_chapters&manga=" .. tostring(mangaId),
     }
 
-    for _, body in ipairs(attempts) do
-        local r = http_post(ajaxUrl, body, {
+    for _, body in ipairs(bodies) do
+        local ar = http_post(ajaxUrl2, body, {
             headers = {
                 ["X-Requested-With"] = "XMLHttpRequest",
                 ["Referer"] = bookUrl,
@@ -189,8 +208,8 @@ local function fetchChaptersFromAjax(bookUrl, mangaId)
             }
         })
 
-        if r.success and r.body and r.body ~= "" then
-            local chapters = parseChapterLinks(r.body, bookUrl:match("/novel/([^/]+)/"))
+        if ar.success and ar.body and ar.body ~= "" then
+            local chapters = parseChapterLinks(ar.body, bookUrl:match("/novel/([^/]+)/"))
             if #chapters > 0 then
                 return chapters
             end
@@ -202,13 +221,7 @@ end
 
 function getCatalogList(index)
     local page = index + 1
-    local url
-
-    if page == 1 then
-        url = baseUrl .. "/novel/"
-    else
-        url = baseUrl .. "/novel/page/" .. tostring(page) .. "/"
-    end
+    local url = (page == 1) and (baseUrl .. "/novel/") or (baseUrl .. "/novel/page/" .. tostring(page) .. "/")
 
     local r = http_get(url)
     if not r.success then
@@ -224,13 +237,9 @@ end
 
 function getCatalogSearch(index, query)
     local page = index + 1
-    local url
-
-    if page == 1 then
-        url = baseUrl .. "/?s=" .. url_encode(query) .. "&post_type=wp-manga"
-    else
-        url = baseUrl .. "/page/" .. tostring(page) .. "/?s=" .. url_encode(query) .. "&post_type=wp-manga"
-    end
+    local url = (page == 1)
+        and (baseUrl .. "/?s=" .. url_encode(query) .. "&post_type=wp-manga")
+        or (baseUrl .. "/page/" .. tostring(page) .. "/?s=" .. url_encode(query) .. "&post_type=wp-manga")
 
     local r = http_get(url)
     if not r.success then
@@ -277,8 +286,10 @@ function getBookCoverImageUrl(bookUrl)
     end
 
     local img = html_select_first(body, ".summary_image img")
-    if img and img.src and img.src ~= "" then
-        return absUrl(img.src)
+        or html_select_first(body, ".item-thumb img")
+
+    if img and (img.src or img["data-src"]) then
+        return absUrl(img.src or img["data-src"])
     end
 
     return nil
@@ -312,7 +323,7 @@ function getBookGenres(bookUrl)
     local genres = {}
     local seen = {}
 
-    for _, a in ipairs(html_select(body, ".genres-content a, .genres_wrap a.btn-genres, a[href*='/novel-genre/']")) do
+    for _, a in ipairs(html_select(body, ".genres-content a, .genres_wrap a.btn-genres, .post-content_item a[href*='/novel-genre/']")) do
         local g = string_clean(a.text or "")
         if g ~= "" and not seen[g] then
             seen[g] = true
@@ -328,32 +339,37 @@ function getChapterList(bookUrl)
     if not body then return {} end
 
     local novelSlug = bookUrl:match("/novel/([^/]+)/")
+    local chapters = {}
+
     local holder = html_select_first(body, "#manga-chapters-holder")
+    local mangaId = nil
 
-    if holder and holder["data-id"] then
-        local mangaId = holder["data-id"]
-        local chapters = fetchChaptersFromAjax(bookUrl, mangaId)
+    if holder and holder["data-id"] and holder["data-id"] ~= "" then
+        mangaId = holder["data-id"]
+    end
+
+    if not mangaId then
+        local picker = html_select_first(body, ".chapters_selectbox_holder")
+        if picker then
+            mangaId = picker["data-manga"] or picker["data-id"]
+        end
+    end
+
+    if mangaId and mangaId ~= "" then
+        chapters = fetchChaptersAjax(bookUrl, mangaId)
         if #chapters > 0 then
             return chapters
         end
     end
 
-    local varId = body:match([["manga_id":"(%d+)"]]) or body:match([[manga_id":"(%d+)"]])
-    if varId then
-        local chapters = fetchChaptersFromAjax(bookUrl, varId)
-        if #chapters > 0 then
-            return chapters
-        end
-    end
-
-    local chapters = parseChapterLinks(body, novelSlug)
+    chapters = parseChapterLinks(body, novelSlug)
     if #chapters > 0 then
         return chapters
     end
 
-    local ajaxFallback = http_get(bookUrl:gsub("/?$", "") .. "/ajax/chapters/?t=1")
-    if ajaxFallback.success and ajaxFallback.body and ajaxFallback.body ~= "" then
-        chapters = parseChapterLinks(ajaxFallback.body, novelSlug)
+    local fallback = http_get(bookUrl:gsub("/?$", "") .. "/ajax/chapters/?t=1")
+    if fallback.success and fallback.body and fallback.body ~= "" then
+        chapters = parseChapterLinks(fallback.body, novelSlug)
         if #chapters > 0 then
             return chapters
         end
@@ -365,12 +381,6 @@ end
 function getChapterListHash(bookUrl)
     local chapters = getChapterList(bookUrl)
     if #chapters == 0 then
-        local body = fetchPage(bookUrl)
-        if not body then return nil end
-        local holder = html_select_first(body, "#manga-chapters-holder")
-        if holder and holder["data-id"] then
-            return "manga_" .. holder["data-id"]
-        end
         return bookUrl
     end
 
@@ -391,7 +401,10 @@ function getChapterText(html, url)
     local el =
         html_select_first(html, ".reading-content .text-left")
         or html_select_first(html, ".reading-content")
+        or html_select_first(html, ".entry-content .entry-content_wrap")
         or html_select_first(html, ".entry-content")
+        or html_select_first(html, ".chapter-content")
+        or html_select_first(html, "#content")
         or html_select_first(html, "article")
 
     if not el then
@@ -401,11 +414,157 @@ function getChapterText(html, url)
     local text = html_text(el.html or "")
     text = cleanText(text)
 
-    text = text:gsub("Read More", "")
-    text = text:gsub("Next Chapter", "")
-    text = text:gsub("Previous Chapter", "")
+    text = text:gsub("Listen to this Chapter", "")
+    text = text:gsub("Previous", "")
+    text = text:gsub("Next", "")
     text = text:gsub("Report this chapter", "")
-    text = text:gsub("NOVEL DISCUSSION.-$", "")
+    text = text:gsub("Read More", "")
+    text = cleanText(text)
 
-    return cleanText(text)
+    return text
+end
+
+function getFilterList()
+    return {
+        {
+            type = "select",
+            key = "m_orderby",
+            label = "Order By",
+            defaultValue = "rating",
+            options = {
+                { value = "rating",    label = "Rating" },
+                { value = "latest",    label = "Latest" },
+                { value = "alphabet",  label = "A-Z" },
+                { value = "trending",  label = "Trending" },
+                { value = "views",     label = "Most Views" },
+                { value = "new-manga", label = "New" },
+                { value = "",          label = "Relevance" },
+            }
+        },
+        {
+            type = "checkbox",
+            key = "genre",
+            label = "Genres",
+            options = {
+                { value = "action",        label = "Action" },
+                { value = "adventure",     label = "Adventure" },
+                { value = "comedy",        label = "Comedy" },
+                { value = "drama",         label = "Drama" },
+                { value = "eastern",       label = "Eastern" },
+                { value = "fantasy",       label = "Fantasy" },
+                { value = "game",          label = "Game" },
+                { value = "historical",    label = "Historical" },
+                { value = "horror",        label = "Horror" },
+                { value = "josei",         label = "Josei" },
+                { value = "martial-arts",  label = "Martial Arts" },
+                { value = "mystery",       label = "Mystery" },
+                { value = "psychological", label = "Psychological" },
+                { value = "romance",       label = "Romance" },
+                { value = "school-life",   label = "School Life" },
+                { value = "sci-fi",        label = "Sci-fi" },
+                { value = "shounen",       label = "Shounen" },
+                { value = "slice-of-life", label = "Slice of Life" },
+                { value = "supernatural",  label = "Supernatural" },
+                { value = "urban",         label = "Urban" },
+                { value = "wuxia",         label = "Wuxia" },
+                { value = "xianxia",       label = "Xianxia" },
+                { value = "xuanhuan",      label = "Xuanhuan" },
+            }
+        },
+        {
+            type = "select",
+            key = "op",
+            label = "Genres Condition",
+            defaultValue = "",
+            options = {
+                { value = "",  label = "OR (having one of selected genres)" },
+                { value = "1", label = "AND (having all selected genres)" },
+            }
+        },
+        {
+            type = "select",
+            key = "adult",
+            label = "Adult Content",
+            defaultValue = "",
+            options = {
+                { value = "",  label = "All" },
+                { value = "0", label = "None adult content" },
+                { value = "1", label = "Only adult content" },
+            }
+        },
+        {
+            type = "checkbox",
+            key = "status",
+            label = "Status",
+            options = {
+                { value = "on-going", label = "On Going" },
+                { value = "end",      label = "Completed" },
+                { value = "canceled", label = "Canceled" },
+                { value = "on-hold",  label = "On Hold" },
+                { value = "upcoming", label = "Upcoming" },
+            }
+        },
+        {
+            type = "text",
+            key = "author",
+            label = "Author",
+            defaultValue = ""
+        },
+        {
+            type = "text",
+            key = "release",
+            label = "Year of Released",
+            defaultValue = ""
+        },
+    }
+end
+
+function getCatalogFiltered(index, filters)
+    local page     = index + 1
+    local orderby  = filters["m_orderby"] or "rating"
+    local op       = filters["op"] or ""
+    local adult    = filters["adult"] or ""
+    local author   = filters["author"] or ""
+    local artist   = filters["artist"] or ""
+    local release  = filters["release"] or ""
+    local genres   = filters["genre_included"] or {}
+    local statuses = filters["status_included"] or {}
+
+    local basePath = ""
+    if page > 1 then
+        basePath = "/page/" .. page .. "/"
+    end
+
+    local url = baseUrl .. basePath .. "?s&post_type=wp-manga"
+        .. "&m_orderby=" .. url_encode(orderby)
+        .. "&op=" .. url_encode(op)
+        .. "&adult=" .. url_encode(adult)
+
+    if author ~= "" then
+        url = url .. "&author=" .. url_encode(author)
+    end
+    if artist ~= "" then
+        url = url .. "&artist=" .. url_encode(artist)
+    end
+    if release ~= "" then
+        url = url .. "&release=" .. url_encode(release)
+    end
+
+    for _, v in ipairs(genres) do
+        url = url .. "&genre[]=" .. url_encode(v)
+    end
+    for _, v in ipairs(statuses) do
+        url = url .. "&status[]=" .. url_encode(v)
+    end
+
+    local r = http_get(url)
+    if not r.success then
+        return { items = {}, hasNext = false }
+    end
+
+    local items = parseCatalogItems(r.body)
+    return {
+        items = items,
+        hasNext = #items > 0
+    }
 end
