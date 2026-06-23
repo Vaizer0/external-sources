@@ -1,7 +1,7 @@
 -- ── Метаданные ───────────────────────────────────────────────────────────────
 id       = "localpaste"
 name     = "Local Paste"
-version  = "1.0.0"
+version  = "1.0.5"
 baseUrl  = "https://httpbin.org/"
 language = "en"
 icon     = "https://raw.githubusercontent.com/Vaizer0/external-sources/refs/heads/main/icons/vaizero.png"
@@ -167,14 +167,27 @@ function getChapterListHash(bookUrl)
 end
 
 function getChapterText(html, chapterUrl)
-    -- Extract chapter number from the query parameter "?chapter=N"
+    -- Log the URL for debugging
+    log_info("localpaste: getChapterText called with URL: " .. tostring(chapterUrl))
+
+    -- Try to extract chapter number from query parameter ?chapter=N
     local num = tonumber(string.match(chapterUrl, "chapter=(%d+)"))
     if not num then
-        log_error("localpaste: cannot parse chapter number from " .. tostring(chapterUrl))
-        return ""
+        -- Fallback: try to extract from path /chapter/N
+        num = tonumber(string.match(chapterUrl, "/chapter/(%d+)"))
     end
+    if not num then
+        log_error("localpaste: cannot parse chapter number from " .. tostring(chapterUrl))
+        return "Error: Invalid chapter URL. Please re-add the chapter."
+    end
+
     local text = getChapterTextByIndex(num)
-    return text or ""
+    if text then
+        return text
+    else
+        log_error("localpaste: chapter " .. num .. " not found in storage")
+        return "Chapter " .. num .. " content missing. Please re-add the chapter."
+    end
 end
 
 -- ── Настройки ────────────────────────────────────────────────────────────────
