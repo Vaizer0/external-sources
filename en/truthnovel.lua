@@ -1,98 +1,82 @@
 id       = "truthnovel"
 name     = "Truth Novel"
-version  = "1.0.8"
+version  = "1.0.9"
 baseUrl  = "https://truthnovel.top"
 language = "en"
 icon     = "https://truthnovel.top/wp-content/uploads/2024/02/الجديدة.jpg"
 
 local function absUrl(href)
-if not href or href == "" then
-return ""
-end
+    if not href or href == "" then
+        return ""
+    end
 
-if href:sub(1,4) == "http" then
-    return href
-end
+    if href:sub(1,4) == "http" then
+        return href
+    end
 
-if href:sub(1,2) == "//" then
-    return "https:" .. href
-end
+    if href:sub(1,2) == "//" then
+        return "https:" .. href
+    end
 
-return url_resolve(baseUrl, href)
-
+    return url_resolve(baseUrl, href)
 end
 
 function getCatalogList(index)
-if index > 0 then
-return {
-items = {},
-hasNext = false
-}
-end
 
-return {
-    items = {
-        {
-            title = "Lord of Truth",
-            url = baseUrl .. "/list/257/",
-            cover = icon
+    if index > 0 then
+        return {
+            items = {},
+            hasNext = false
         }
-    },
-    hasNext = false
-}
+    end
 
+    return {
+        items = {
+            {
+                title = "Lord of Truth",
+                url = baseUrl .. "/list/257/",
+                cover = icon
+            }
+        },
+        hasNext = false
+    }
 end
 
 function getCatalogSearch(index, query)
-return getCatalogList(index)
+    return getCatalogList(index)
 end
 
 function getBookTitle(bookUrl)
-return "Lord of Truth"
+    return "Lord of Truth"
 end
 
 function getBookCoverImageUrl(bookUrl)
-return icon
+    return icon
 end
 
 function getBookDescription(bookUrl)
-return "Lord of Truth / Master of Truth"
+    return "Lord of Truth / Master of Truth"
 end
 
 function getBookGenres(bookUrl)
-return {
-"Fantasy"
-}
+    return {
+        "Fantasy"
+    }
 end
 
 function getChapterList(bookUrl)
 
-local r = http_get(bookUrl)
+    local r = http_get(bookUrl)
 
-if not r.success then
-    return {}
-end
-
-local chapters = {}
-
-for _, a in ipairs(html_select(r.body, "a.w4pl_post_title")) do
-
-    local title = string_clean(a.text)
-    local url = absUrl(a.href)
-
-    if title ~= "" and url ~= "" then
-        table.insert(chapters, {
-            title = title,
-            url = url
-        })
+    if not r.success then
+        return {}
     end
-end
 
-if #chapters == 0 then
+    local chapters = {}
 
-    for _, a in ipairs(html_select(r.body, "a.post_title")) do
+    for _, a in ipairs(html_select(r.body, "a.w4pl_post_title")) do
 
-        local title = string_clean(a.text)
+        local title = a.text or ""
         local url = absUrl(a.href)
 
         if title ~= "" and url ~= "" then
@@ -102,96 +86,154 @@ if #chapters == 0 then
             })
         end
     end
-end
 
-table.sort(chapters, function(a, b)
+    if #chapters == 0 then
 
-    local na =
-        tonumber(
-            a.title:match("^(%d+)")
-        ) or 0
+        for _, a in ipairs(html_select(r.body, "a.post_title")) do
 
-    local nb =
-        tonumber(
-            b.title:match("^(%d+)")
-        ) or 0
+            local title = a.text or ""
+            local url = absUrl(a.href)
 
-    return na < nb
-end)
+            if title ~= "" and url ~= "" then
+                table.insert(chapters, {
+                    title = title,
+                    url = url
+                })
+            end
+        end
+    end
 
-return chapters
+    table.sort(chapters, function(a, b)
 
+        local na =
+            tonumber(
+                (a.title or ""):match("^(%d+)")
+            ) or 0
+
+        local nb =
+            tonumber(
+                (b.title or ""):match("^(%d+)")
+            ) or 0
+
+        return na < nb
+    end)
+
+    return chapters
 end
 
 function getChapterListHash(bookUrl)
-return "truthnovel-v8"
+    return "truthnovel-v9"
 end
 
 function getChapterText(html, url)
 
-html = html:gsub(
-    '<script type="application/ld%+json".-</script>',
-    ''
-)
+    if not html or html == "" then
+        return ""
+    end
 
-html = html:gsub(
-    '<script.-</script>',
-    ''
-)
-
-html = html:gsub(
-    '<style.-</style>',
-    ''
-)
-
-local content =
-    html:match(
-        '<div class="entry%-content.-</div>%s*</div>'
-    )
-
-if not content then
-    content =
+    local content =
         html:match(
-            '<article.-</article>'
+            '<div class="entry%-content.-wpdiscuz'
         )
-end
 
-if not content then
-    return html
-end
+    if not content then
+        content =
+            html:match(
+                '<article.-wpdiscuz'
+            )
+    end
 
-content =
-    content:gsub(
-        "<br ?/?>",
-        "\n"
-    )
+    if not content then
+        content =
+            html:match(
+                '<body.-</body>'
+            )
+    end
 
-content =
-    content:gsub(
-        "</p>",
-        "\n\n"
-    )
+    if not content then
+        return html
+    end
 
-local text = html_text(content)
+    content =
+        content:gsub(
+            '<script.-</script>',
+            ''
+        )
 
-text =
-    text:gsub(
-        "الموضوع التالي.*",
-        ""
-    )
+    content =
+        content:gsub(
+            '<style.-</style>',
+            ''
+        )
 
-text =
-    text:gsub(
-        "Disclaimer.*",
-        ""
-    )
+    content =
+        content:gsub(
+            '<!%-%-.-%-%->',
+            ''
+        )
 
-text =
-    text:gsub(
-        "Novel Stories.*",
-        ""
-    )
+    content =
+        content:gsub(
+            '<br%s*/?>',
+            '\n'
+        )
 
-return string_trim(text)
+    content =
+        content:gsub(
+            '</p>',
+            '\n\n'
+        )
 
+    content =
+        content:gsub(
+            '<[^>]->',
+            ''
+        )
+
+    content =
+        content:gsub('&nbsp;', ' ')
+        :gsub('&quot;', '"')
+        :gsub('&#8220;', '"')
+        :gsub('&#8221;', '"')
+        :gsub('&#8217;', "'")
+        :gsub('&hellip;', '...')
+        :gsub('&amp;', '&')
+
+    content =
+        content:gsub(
+            'الموضوع السابق',
+            ''
+        )
+
+    content =
+        content:gsub(
+            'الموضوع التالي',
+            ''
+        )
+
+    content =
+        content:gsub(
+            'Disclaimer',
+            ''
+        )
+
+    content =
+        content:gsub(
+            'Novel Stories',
+            ''
+        )
+
+    content =
+        content:gsub(
+            'wpDiscuz',
+            ''
+        )
+
+    content =
+        content:gsub(
+            '\n%s*\n%s*\n+',
+            '\n\n'
+        )
+
+    return content
 end
