@@ -8,7 +8,7 @@ version  = "1.6.2"
 baseUrl  = "https://www.sonicmtl.com"
 language = "mtl"
 icon     = "https://www.sonicmtl.com/wp-content/uploads/2021/09/sonicmtl-icon-1.png"
-charset  = "UTF-8"
+
 
 local _pageCache = {}
 
