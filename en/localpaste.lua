@@ -1,6 +1,6 @@
 -- ── Метаданные ───────────────────────────────────────────────────────────────
 id       = "localpaste"
-name     = "Local Paste (Copypaste)"
+name     = "Local Paste"
 version  = "1.0.0"
 baseUrl  = "https://httpbin.org/"
 language = "en"
