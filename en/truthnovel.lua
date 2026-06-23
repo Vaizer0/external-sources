@@ -1,6 +1,6 @@
 id       = "truthnovel"
 name     = "Truth Novel"
-version  = "1.0.0"
+version  = "1.1.2"
 baseUrl  = "https://truthnovel.top"
 language = "en"
 icon     = "https://truthnovel.top/wp-content/uploads/2024/02/الجديدة.jpg"
@@ -22,7 +22,6 @@ local function absUrl(href)
 end
 
 function getCatalogList(index)
-
     if index > 0 then
         return {
             items = {},
@@ -73,9 +72,8 @@ function getChapterList(bookUrl)
     local chapters = {}
 
     for _, a in ipairs(html_select(r.body, "a.w4pl_post_title")) do
-
         if a.href and a.text then
-            table.insert(chapters,{
+            table.insert(chapters, {
                 title = a.text,
                 url = absUrl(a.href)
             })
@@ -83,11 +81,9 @@ function getChapterList(bookUrl)
     end
 
     if #chapters == 0 then
-
         for _, a in ipairs(html_select(r.body, "a.post_title")) do
-
             if a.href and a.text then
-                table.insert(chapters,{
+                table.insert(chapters, {
                     title = a.text,
                     url = absUrl(a.href)
                 })
@@ -95,18 +91,9 @@ function getChapterList(bookUrl)
         end
     end
 
-    table.sort(chapters,function(a,b)
-
-        local na =
-            tonumber(
-                (a.title or ""):match("^(%d+)")
-            ) or 0
-
-        local nb =
-            tonumber(
-                (b.title or ""):match("^(%d+)")
-            ) or 0
-
+    table.sort(chapters, function(a, b)
+        local na = tonumber((a.title or ""):match("^(%d+)")) or 0
+        local nb = tonumber((b.title or ""):match("^(%d+)")) or 0
         return na < nb
     end)
 
@@ -114,151 +101,42 @@ function getChapterList(bookUrl)
 end
 
 function getChapterListHash(bookUrl)
-    return "truthnovel-v111"
+    return "truthnovel-v112"
 end
 
-function getChapterText(html,url)
+function getChapterText(html, url)
 
     if not html or html == "" then
         return ""
     end
 
-    html =
-        html:gsub(
-            "<script.-</script>",
-            ""
-        )
+    html = html:gsub("<script.-</script>", "")
+    html = html:gsub("<style.-</style>", "")
 
-    html =
-        html:gsub(
-            "<style.-</style>",
-            ""
-        )
+    local entry = html_select_first(html, ".entry-content")
 
-    html =
-        html:gsub(
-            '<script type="application/ld%+json".-</script>',
-            ""
-        )
-
-    local content =
-        html:match(
-            '<div class="entry%-content[^"]*">(.-)<div id="wpdcom"'
-        )
-
-    if not content then
-        content =
-            html:match(
-                '<div class="entry%-content[^"]*">(.-)wpDiscuz'
-            )
+    if not entry then
+        return html
     end
 
-    if not content then
-        content =
-            html:match(
-                '<article.-<div class="entry%-content[^"]*">(.-)</article>'
-            )
+    local content = entry.html
+
+    content = content:gsub("<script.-</script>", "")
+    content = content:gsub("<style.-</style>", "")
+
+    content = content:gsub("<br%s*/?>", "\n")
+    content = content:gsub("</p>", "\n\n")
+
+    local text = html_text(content)
+
+    if not text or text == "" then
+        return content
     end
 
-    if not content then
+    text = text:gsub("الموضوع السابق.-اذكر الله", "")
+    text = text:gsub("الموضوع التالي.*", "")
+    text = text:gsub("Disclaimer.*", "")
+    text = text:gsub("wpDiscuz.*", "")
 
-        local el =
-            html_select_first(
-                html,
-                ".entry-content"
-            )
-
-        if el then
-            return html_text(el.html)
-        end
-
-        return ""
-    end
-
-    content =
-        content:gsub(
-            '<script.-</script>',
-            ''
-        )
-
-    content =
-        content:gsub(
-            '<style.-</style>',
-            ''
-        )
-
-    content =
-        content:gsub(
-            '<!%-%-.-%-%->',
-            ''
-        )
-
-    content =
-        content:gsub(
-            '</p>',
-            '\n\n'
-        )
-
-    content =
-        content:gsub(
-            '<br ?/?>',
-            '\n'
-        )
-
-    content =
-        content:gsub(
-            '<br/>',
-            '\n'
-        )
-
-    content =
-        content:gsub(
-            '<br />',
-            '\n'
-        )
-
-    content =
-        content:gsub(
-            '<[^>]+>',
-            ''
-        )
-
-    content =
-        content:gsub('&nbsp;',' ')
-        :gsub('&amp;','&')
-        :gsub('&quot;','"')
-        :gsub('&#8217;',"'")
-        :gsub('&#8220;','"')
-        :gsub('&#8221;','"')
-
-    content =
-        content:gsub(
-            '"@context".-Novel Stories',
-            ''
-        )
-
-    content =
-        content:gsub(
-            'Novel Stories.-الموضوع التالي',
-            ''
-        )
-
-    content =
-        content:gsub(
-            'Disclaimer.-$',
-            ''
-        )
-
-    content =
-        content:gsub(
-            'wpDiscuz.-$',
-            ''
-        )
-
-    content =
-        content:gsub("\r\n", "\n")
-        :gsub("\r", "\n")
-        :gsub("\n\n\n+", "\n\n")
-
-    return content
+    return text
 end
