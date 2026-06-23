@@ -1,6 +1,6 @@
 id       = "sonicmtl"
 name     = "Sonic MTL"
-version  = "1.3.0"
+version  = "1.4.0"
 baseUrl  = "https://www.sonicmtl.com"
 language = "mtl"
 icon     = "https://www.sonicmtl.com/wp-content/uploads/2021/09/sonicmtl-icon-1.png"
@@ -123,12 +123,14 @@ local function parseChapterLinks(body, novelSlug)
             return
         end
 
-        if novelSlug and not href:find("/novel/" .. novelSlug .. "/") then
-            return
-        end
+        if novelSlug then
+            if not href:find("/novel/" .. novelSlug .. "/") then
+                return
+            end
 
-        if not href:find("/chapter") and not href:find("chapter%-") then
-            return
+            if href == (baseUrl .. "/novel/" .. novelSlug .. "/") then
+                return
+            end
         end
 
         seen[href] = true
@@ -147,6 +149,7 @@ local function parseChapterLinks(body, novelSlug)
         ".chapter a",
         "a.btn-link",
         "a[href*='/chapter']",
+        "a[href*='/novel/']",
     }) do
         for _, a in ipairs(html_select(body, sel)) do
             addChapter(a.text or "", a.href or "")
@@ -155,7 +158,12 @@ local function parseChapterLinks(body, novelSlug)
 
     local numbered = {}
     for _, ch in ipairs(chapters) do
-        local n = tonumber((ch.title or ""):match("^(%d+)")) or tonumber((ch.url or ""):match("chapter%-(%d+)")) or tonumber((ch.url or ""):match("/(%d+)%-[^/]+/?$")) or 0
+        local n =
+            tonumber((ch.url or ""):match("/(%d+)%-.+/?$"))
+            or tonumber((ch.url or ""):match("chapter%-(%d+)"))
+            or tonumber((ch.title or ""):match("^(%d+)"))
+            or 0
+
         table.insert(numbered, { n = n, title = ch.title, url = ch.url })
     end
 
@@ -184,74 +192,58 @@ local function fetchAjaxChapters(bookUrl, mangaId)
         {
             url = bookUrl:gsub("/?$", "") .. "/ajax/chapters/?t=1",
             body = "",
-            post = true
         },
         {
             url = bookUrl:gsub("/?$", "") .. "/ajax/chapters/",
             body = "",
-            post = true
         },
         {
             url = baseUrl .. "/wp-admin/admin-ajax.php",
             body = "action=wp-manga-get-chapters&post_id=" .. tostring(mangaId),
-            post = true
         },
         {
             url = baseUrl .. "/wp-admin/admin-ajax.php",
             body = "action=wp-manga-get-chapters&manga_id=" .. tostring(mangaId),
-            post = true
         },
         {
             url = baseUrl .. "/wp-admin/admin-ajax.php",
             body = "action=wp-manga-get-chapters&manga=" .. tostring(mangaId),
-            post = true
         },
         {
             url = baseUrl .. "/wp-admin/admin-ajax.php",
             body = "action=manga_get_chapters&post_id=" .. tostring(mangaId),
-            post = true
         },
         {
             url = baseUrl .. "/wp-admin/admin-ajax.php",
             body = "action=manga_get_chapters&manga_id=" .. tostring(mangaId),
-            post = true
         },
         {
             url = baseUrl .. "/wp-admin/admin-ajax.php",
             body = "action=manga_get_chapters&manga=" .. tostring(mangaId),
-            post = true
         },
         {
             url = baseUrl .. "/wp-admin/admin-ajax.php",
             body = "action=madara_load_chapters&post_id=" .. tostring(mangaId),
-            post = true
         },
         {
             url = baseUrl .. "/wp-admin/admin-ajax.php",
             body = "action=madara_load_chapters&manga_id=" .. tostring(mangaId),
-            post = true
         },
         {
             url = baseUrl .. "/wp-admin/admin-ajax.php",
             body = "action=madara_load_chapters&manga=" .. tostring(mangaId),
-            post = true
         },
     }
 
     for _, req in ipairs(attempts) do
-        local r
-        if req.post then
-            r = http_post(req.url, req.body, {
-                headers = {
-                    ["Content-Type"] = "application/x-www-form-urlencoded; charset=UTF-8",
-                    ["X-Requested-With"] = "XMLHttpRequest",
-                    ["Referer"] = bookUrl,
-                    ["Origin"] = baseUrl
-                }
-            })
-        else
-            r = http_get(req.url)
-        end
+        local r = http_post(req.url, req.body, {
+            headers = {
+                ["Content-Type"] = "application/x-www-form-urlencoded; charset=UTF-8",
+                ["X-Requested-With"] = "XMLHttpRequest",
+                ["Referer"] = bookUrl,
+                ["Origin"] = baseUrl
+            }
+        })
 
         if r and r.success and r.body and r.body ~= "" then
             local chapters = parseChapterLinks(r.body, novelSlug)
@@ -552,14 +544,14 @@ function getFilterList()
 end
 
 function getCatalogFiltered(index, filters)
-    local page    = index + 1
-    local orderby = filters["m_orderby"] or "rating"
-    local op      = filters["op"] or ""
-    local adult   = filters["adult"] or ""
-    local author  = filters["author"] or ""
-    local artist  = filters["artist"] or ""
-    local release = filters["release"] or ""
-    local genres  = filters["genre_included"] or {}
+    local page     = index + 1
+    local orderby  = filters["m_orderby"] or "rating"
+    local op       = filters["op"] or ""
+    local adult    = filters["adult"] or ""
+    local author   = filters["author"] or ""
+    local artist   = filters["artist"] or ""
+    local release  = filters["release"] or ""
+    local genres   = filters["genre_included"] or {}
     local statuses = filters["status_included"] or {}
 
     local basePath = ""
