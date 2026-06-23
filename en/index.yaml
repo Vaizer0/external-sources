@@ -14,7 +14,7 @@ sources:
     icon: "https://raw.githubusercontent.com/HnDK0/external-sources/main/icons/freewebnovel.png"
     language: "en"
   - id: "localpaste"
-    name: "Local Paste (Copypaste)"
+    name: "Local Paste"
     version: "1.0.0"
     url: "https://raw.githubusercontent.com/Vaizer0/external-sources/refs/heads/main/en/localpaste.lua"
     icon: "https://raw.githubusercontent.com/Vaizer0/external-sources/refs/heads/main/icons/vaizero.png"
