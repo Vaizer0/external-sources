@@ -1,6 +1,6 @@
 id       = "truthnovel"
 name     = "Truth Novel"
-version  = "1.0.2"
+version  = "1.0.3"
 baseUrl  = "https://truthnovel.top"
 language = "en"
 icon     = "https://truthnovel.top/wp-content/uploads/2024/02/الجديدة.jpg"
@@ -42,26 +42,11 @@ function getBookCoverImageUrl(bookUrl)
 end
 
 function getBookDescription(bookUrl)
-    local r = http_get(bookUrl)
-    if not r.success then
-        return "Lord of Truth / Master of Truth"
-    end
-
-    local meta = html_select_first(r.body, "meta[property='og:description']")
-    if meta and meta.content then
-        return meta.content
-    end
-
     return "Lord of Truth / Master of Truth"
 end
 
 function getBookGenres(bookUrl)
-    return {
-        "Fantasy",
-        "Action",
-        "Adventure",
-        "Mystery"
-    }
+    return {"Fantasy"}
 end
 
 function getChapterList(bookUrl)
@@ -92,46 +77,9 @@ function getChapterList(bookUrl)
 end
 
 function getChapterListHash(bookUrl)
-    local r = http_get(bookUrl)
-    if not r.success then return nil end
-
-    local first = html_select_first(r.body, "a.w4pl_post_title")
-    if first then
-        return first.href
-    end
-
-    return nil
+    return "truthnovel-debug"
 end
 
 function getChapterText(html, url)
-
-    local cleaned = html_remove(
-        html,
-        "script",
-        "style",
-        "#comments",
-        "#wpdcom",
-        ".comments-area",
-        ".sharedaddy",
-        ".post-share",
-        ".post-views"
-    )
-
-    local el =
-        html_select_first(cleaned, ".single-post-content")
-        or html_select_first(cleaned, ".post-content")
-        or html_select_first(cleaned, ".wp-block-post-content")
-        or html_select_first(cleaned, ".entry-content")
-        or html_select_first(cleaned, "article")
-
-    if not el then
-        return ""
-    end
-
-    local text = html_text(el.html)
-
-    text = string_normalize(text)
-    text = string_trim(text)
-
-    return text
+    return html
 end
