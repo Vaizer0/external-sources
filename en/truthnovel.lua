@@ -1,6 +1,6 @@
 id       = "truthnovel"
 name     = "Truth Novel"
-version  = "1.0.7"
+version  = "1.0.8"
 baseUrl  = "https://truthnovel.top"
 language = "en"
 icon     = "https://truthnovel.top/wp-content/uploads/2024/02/الجديدة.jpg"
@@ -76,6 +76,7 @@ end
 local chapters = {}
 
 for _, a in ipairs(html_select(r.body, "a.w4pl_post_title")) do
+
     local title = string_clean(a.text)
     local url = absUrl(a.href)
 
@@ -87,9 +88,34 @@ for _, a in ipairs(html_select(r.body, "a.w4pl_post_title")) do
     end
 end
 
+if #chapters == 0 then
+
+    for _, a in ipairs(html_select(r.body, "a.post_title")) do
+
+        local title = string_clean(a.text)
+        local url = absUrl(a.href)
+
+        if title ~= "" and url ~= "" then
+            table.insert(chapters, {
+                title = title,
+                url = url
+            })
+        end
+    end
+end
+
 table.sort(chapters, function(a, b)
-    local na = tonumber(a.title:match("^(%d+)")) or 0
-    local nb = tonumber(b.title:match("^(%d+)")) or 0
+
+    local na =
+        tonumber(
+            a.title:match("^(%d+)")
+        ) or 0
+
+    local nb =
+        tonumber(
+            b.title:match("^(%d+)")
+        ) or 0
+
     return na < nb
 end)
 
@@ -98,9 +124,74 @@ return chapters
 end
 
 function getChapterListHash(bookUrl)
-return "truthnovel-v7"
+return "truthnovel-v8"
 end
 
 function getChapterText(html, url)
-return html
+
+html = html:gsub(
+    '<script type="application/ld%+json".-</script>',
+    ''
+)
+
+html = html:gsub(
+    '<script.-</script>',
+    ''
+)
+
+html = html:gsub(
+    '<style.-</style>',
+    ''
+)
+
+local content =
+    html:match(
+        '<div class="entry%-content.-</div>%s*</div>'
+    )
+
+if not content then
+    content =
+        html:match(
+            '<article.-</article>'
+        )
+end
+
+if not content then
+    return html
+end
+
+content =
+    content:gsub(
+        "<br ?/?>",
+        "\n"
+    )
+
+content =
+    content:gsub(
+        "</p>",
+        "\n\n"
+    )
+
+local text = html_text(content)
+
+text =
+    text:gsub(
+        "الموضوع التالي.*",
+        ""
+    )
+
+text =
+    text:gsub(
+        "Disclaimer.*",
+        ""
+    )
+
+text =
+    text:gsub(
+        "Novel Stories.*",
+        ""
+    )
+
+return string_trim(text)
+
 end
