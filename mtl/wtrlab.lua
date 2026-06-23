@@ -1,7 +1,7 @@
 -- ── Метаданные ───────────────────────────────────────────────────────────────
 id = "wtrlab"
 name = "WTR-LAB"
-version = "2.0.0"
+version = "2.0.1"
 baseUrl = "https://wtr-lab.com/"
 language = "MTL"
 icon = "https://raw.githubusercontent.com/HnDK0/external-sources/main/icons/wtr-lab.png"
@@ -16,7 +16,6 @@ local function fetchPage(url)
     if _pageCache[url] then
         return _pageCache[url]
     end
-    -- Add headers to avoid adblock detection
     local r = http_get(url, {
         headers = {
             ["User-Agent"] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -263,13 +262,11 @@ local function parseChapterFromHtml(html)
     -- Try multiple possible containers
     local el = html_select_first(cleaned, ".chapter-content, .reader-content, .content, main, article")
     if not el then
-        -- Try to find the text directly in the body (fallback)
+        -- Fallback: try to find text in the entire body
         local body = html_select_first(cleaned, "body")
         if body then
-            -- Remove navigation and footer text
             local text = body.text
             -- Try to extract only the chapter text by looking for common patterns
-            -- The text usually starts after "Chapter X" heading
             local start = text:find("Chapter %d+") or text:find("Ch%.? %d+") or 1
             if start then
                 text = text:sub(start)
@@ -390,219 +387,229 @@ function getChapterText(html, chapterUrl)
     if mode == "web" or mode == "webplus" then
         log_info("wtrlab: fetching chapter page for mode=" .. mode)
         
-        -- Ensure the URL has the service parameter
+        -- Ensure the URL has the service parameter (should already have it from getChapterList)
         local fetchUrl = chapterUrl
         if not fetchUrl:find("service=") then
             fetchUrl = fetchUrl .. (fetchUrl:find("?") and "&" or "?") .. "service=" .. mode
         end
         
         local pageHtml = fetchPage(fetchUrl)
-        if not pageHtml then
+        if pageHtml then
+            local text = parseChapterFromHtml(pageHtml)
+            if text and text ~= "" then
+                log_info("wtrlab: successfully parsed " .. tostring(#text) .. " chars from HTML")
+                return text
+            else
+                log_error("wtrlab: failed to parse chapter from HTML, trying API fallback for web mode")
+                -- Fallback: try to get the raw/ai translation via API (but this may fail due to login)
+                -- We'll try to use the AI API to get some text, but warn the user.
+                -- Actually, we'll attempt to get the raw text using translate="web", language="zh"
+                -- and then apply nothing. This might return Chinese text, but it's better than nothing.
+                -- We'll do this as a last resort.
+                mode = "raw" -- force raw for fallback
+            end
+        else
             log_error("wtrlab: failed to fetch chapter page for " .. fetchUrl)
+            mode = "raw" -- fallback to raw
+        end
+    end
+
+    -- ── RAW and AI modes (or fallback from web) ────────────────────────────
+    if mode == "raw" or mode == "ai" then
+        log_info("wtrlab: using API for mode=" .. mode)
+
+        local novelId = string.match(chapterUrl, "/novel/(%d+)/")
+        if not novelId then
+            log_error("wtrlab: 'novel' not found in URL: " .. chapterUrl)
             return ""
         end
-        
-        local text = parseChapterFromHtml(pageHtml)
-        if text and text ~= "" then
-            log_info("wtrlab: successfully parsed " .. tostring(#text) .. " chars from HTML")
-            return text
+
+        local chapterNo = tonumber(string.match(chapterUrl, "/chapter%-(%d+)")) or 1
+
+        -- Map mode to API parameters
+        local translateParam
+        local languageParam
+        local applyGlossary = false
+
+        if mode == "raw" then
+            translateParam = "web"
+            languageParam = "zh"
+            applyGlossary = false
+        elseif mode == "ai" then
+            translateParam = "ai"
+            languageParam = "none"
+            applyGlossary = true
         else
-            log_error("wtrlab: failed to parse chapter from HTML, falling back to API")
-            -- Fall through to API if HTML parsing fails
+            -- Fallback for unknown modes
+            translateParam = "ai"
+            languageParam = "none"
+            applyGlossary = false
         end
-    end
 
-    -- ── RAW and AI modes (or fallback): use the API ──────────────────────
-    log_info("wtrlab: using API for mode=" .. mode)
+        log_info("wtrlab: novelId=" .. novelId .. " chapterNo=" .. tostring(chapterNo) ..
+                 " translate=" .. translateParam .. " language=" .. languageParam)
 
-    local novelId = string.match(chapterUrl, "/novel/(%d+)/")
-    if not novelId then
-        log_error("wtrlab: 'novel' not found in URL: " .. chapterUrl)
-        return ""
-    end
+        local requestBody = json_stringify({
+            translate = translateParam,
+            language = languageParam,
+            raw_id = novelId,
+            chapter_no = chapterNo,
+            retry = false,
+            force_retry = false
+        })
 
-    local chapterNo = tonumber(string.match(chapterUrl, "/chapter%-(%d+)")) or 1
+        local r = http_post_retry(baseUrl .. "api/reader/get", requestBody, {
+            headers = {
+                ["Content-Type"] = "application/json",
+                ["Referer"] = chapterUrl,
+                ["Origin"] = regex_replace(baseUrl, "/$", "")
+            }
+        }, 3)
 
-    -- Map mode to API parameters
-    local translateParam
-    local languageParam
-    local applyGlossary = false
+        if not r.success then
+            log_error("wtrlab: API reader/get failed after all attempts code=" .. tostring(r.code))
+            return ""
+        end
 
-    if mode == "raw" then
-        translateParam = "web"
-        languageParam = "zh"
-        applyGlossary = false
-    elseif mode == "ai" then
-        translateParam = "ai"
-        languageParam = "none"
-        applyGlossary = true
-    else
-        -- Fallback for unknown modes
-        translateParam = "ai"
-        languageParam = "none"
-        applyGlossary = false
-    end
+        local json = json_parse(r.body)
+        if not json then
+            log_error("wtrlab: response is not JSON")
+            return ""
+        end
 
-    log_info("wtrlab: novelId=" .. novelId .. " chapterNo=" .. tostring(chapterNo) ..
-             " translate=" .. translateParam .. " language=" .. languageParam)
+        if json.success == false then
+            local errCode = json.code or "?"
+            local errMsg = json.error or "Unknown API error"
+            log_error("wtrlab: API error [" .. tostring(errCode) .. "]: " .. errMsg)
+            error("[" .. tostring(errCode) .. "] " .. errMsg)
+        end
 
-    local requestBody = json_stringify({
-        translate = translateParam,
-        language = languageParam,
-        raw_id = novelId,
-        chapter_no = chapterNo,
-        retry = false,
-        force_retry = false
-    })
+        local outerData = json.data
+        local data = nil
+        if outerData then
+            data = outerData.data or outerData
+        end
+        if not data then
+            log_error("wtrlab: no 'data' in response")
+            return ""
+        end
 
-    local r = http_post_retry(baseUrl .. "api/reader/get", requestBody, {
-        headers = {
-            ["Content-Type"] = "application/json",
-            ["Referer"] = chapterUrl,
-            ["Origin"] = regex_replace(baseUrl, "/$", "")
-        }
-    }, 3)
+        local body = data.body
+        if not body then
+            log_error("wtrlab: no 'body' in data")
+            return ""
+        end
 
-    if not r.success then
-        log_error("wtrlab: API reader/get failed after all attempts code=" .. tostring(r.code))
-        return ""
-    end
-
-    local json = json_parse(r.body)
-    if not json then
-        log_error("wtrlab: response is not JSON")
-        return ""
-    end
-
-    if json.success == false then
-        local errCode = json.code or "?"
-        local errMsg = json.error or "Unknown API error"
-        log_error("wtrlab: API error [" .. tostring(errCode) .. "]: " .. errMsg)
-        error("[" .. tostring(errCode) .. "] " .. errMsg)
-    end
-
-    local outerData = json.data
-    local data = nil
-    if outerData then
-        data = outerData.data or outerData
-    end
-    if not data then
-        log_error("wtrlab: no 'data' in response")
-        return ""
-    end
-
-    local body = data.body
-    if not body then
-        log_error("wtrlab: no 'body' in data")
-        return ""
-    end
-
-    local rawBody
-    if type(body) == "table" then
-        rawBody = json_stringify(body)
-    else
-        rawBody = tostring(body)
-    end
-
-    if rawBody == "" or rawBody == "null" then
-        log_error("wtrlab: body is empty")
-        return ""
-    end
-
-    -- Proxy decryption for AI mode
-    local proxyUrl = "https://wtr-lab-proxy.fly.dev/chapter"
-    local resolvedBody = decryptBody(rawBody, proxyUrl)
-
-    -- ── Load glossary only for AI mode ──────────────────────────────────────
-    local termByOriginal = {}
-    local glossary = {}
-    local patches = {}
-
-    if applyGlossary then
-        -- Load v2 glossary
-        local cache = termCache and termCache[novelId]
-        if cache then
-            termByOriginal = cache.termByOriginal
-            log_info("wtrlab: terms cache hit for novelId=" .. novelId)
+        local rawBody
+        if type(body) == "table" then
+            rawBody = json_stringify(body)
         else
-            local v2Url = baseUrl .. "api/v2/reader/terms/" .. novelId .. ".json"
-            local v2r = http_get_retry(v2Url, {
-                headers = {
-                    ["Referer"] = chapterUrl,
-                    ["Origin"] = regex_replace(baseUrl, "/$", "")
-                }
-            }, 2)
-            if v2r.success then
-                local v2data = json_parse(v2r.body)
-                local termsArray = nil
-                if v2data and type(v2data) == "table" then
-                    if v2data.glossaries then
-                        for _, glossary in ipairs(v2data.glossaries) do
-                            if glossary.data and glossary.data.terms then
-                                termsArray = glossary.data.terms
-                                break
+            rawBody = tostring(body)
+        end
+
+        if rawBody == "" or rawBody == "null" then
+            log_error("wtrlab: body is empty")
+            return ""
+        end
+
+        -- Proxy decryption for AI mode (and also raw if encrypted)
+        local proxyUrl = "https://wtr-lab-proxy.fly.dev/chapter"
+        local resolvedBody = decryptBody(rawBody, proxyUrl)
+
+        -- ── Load glossary only for AI mode ──────────────────────────────────────
+        local termByOriginal = {}
+        local glossary = {}
+        local patches = {}
+
+        if applyGlossary then
+            -- Load v2 glossary
+            local cache = termCache and termCache[novelId]
+            if cache then
+                termByOriginal = cache.termByOriginal
+                log_info("wtrlab: terms cache hit for novelId=" .. novelId)
+            else
+                local v2Url = baseUrl .. "api/v2/reader/terms/" .. novelId .. ".json"
+                local v2r = http_get_retry(v2Url, {
+                    headers = {
+                        ["Referer"] = chapterUrl,
+                        ["Origin"] = regex_replace(baseUrl, "/$", "")
+                    }
+                }, 2)
+                if v2r.success then
+                    local v2data = json_parse(v2r.body)
+                    local termsArray = nil
+                    if v2data and type(v2data) == "table" then
+                        if v2data.glossaries then
+                            for _, glossary in ipairs(v2data.glossaries) do
+                                if glossary.data and glossary.data.terms then
+                                    termsArray = glossary.data.terms
+                                    break
+                                end
                             end
                         end
                     end
+                    if termsArray then
+                        for _, term in ipairs(termsArray) do
+                            local original = term[2]
+                            local translations = term[1]
+                            if original and original ~= "" and type(translations) == "table" and translations[1] then
+                                termByOriginal[original] = translations[1]
+                            end
+                        end
+                        log_info("wtrlab: v2 glossary loaded, " .. tostring(#termsArray) .. " terms")
+                        if not termCache then termCache = {} end
+                        termCache[novelId] = { termByOriginal = termByOriginal }
+                    else
+                        log_info("wtrlab: v2 glossary: unexpected structure")
+                    end
+                else
+                    log_info("wtrlab: v2 glossary fetch failed code=" .. tostring(v2r.code))
                 end
-                if termsArray then
-                    for _, term in ipairs(termsArray) do
-                        local original = term[2]
-                        local translations = term[1]
-                        if original and original ~= "" and type(translations) == "table" and translations[1] then
-                            termByOriginal[original] = translations[1]
+            end
+
+            -- Build chapter glossary
+            if data.glossary_data and data.glossary_data.terms then
+                local terms = data.glossary_data.terms
+                log_info("wtrlab: glossary terms count=" .. tostring(#terms))
+                for i = 1, #terms do
+                    local termEntry = terms[i]
+                    if type(termEntry) == "table" then
+                        local idx = i - 1
+                        local raw = termEntry[1] or ""
+                        local original = termEntry[2] or ""
+                        local matched = original ~= "" and termByOriginal[original]
+                        local termValue = matched or raw
+                        if termValue ~= "" then
+                            glossary[idx] = termValue
                         end
                     end
-                    log_info("wtrlab: v2 glossary loaded, " .. tostring(#termsArray) .. " terms")
-                    if not termCache then termCache = {} end
-                    termCache[novelId] = { termByOriginal = termByOriginal }
-                else
-                    log_info("wtrlab: v2 glossary: unexpected structure")
                 end
-            else
-                log_info("wtrlab: v2 glossary fetch failed code=" .. tostring(v2r.code))
             end
-        end
 
-        -- Build chapter glossary
-        if data.glossary_data and data.glossary_data.terms then
-            local terms = data.glossary_data.terms
-            log_info("wtrlab: glossary terms count=" .. tostring(#terms))
-            for i = 1, #terms do
-                local termEntry = terms[i]
-                if type(termEntry) == "table" then
-                    local idx = i - 1
-                    local raw = termEntry[1] or ""
-                    local original = termEntry[2] or ""
-                    local matched = original ~= "" and termByOriginal[original]
-                    local termValue = matched or raw
-                    if termValue ~= "" then
-                        glossary[idx] = termValue
+            -- Build patches
+            if data.patch then
+                log_info("wtrlab: patches count=" .. tostring(#data.patch))
+                for _, patchItem in ipairs(data.patch) do
+                    if patchItem.zh and patchItem.en and patchItem.zh ~= "" then
+                        table.insert(patches, { zh = patchItem.zh, en = patchItem.en })
                     end
                 end
             end
         end
 
-        -- Build patches
-        if data.patch then
-            log_info("wtrlab: patches count=" .. tostring(#data.patch))
-            for _, patchItem in ipairs(data.patch) do
-                if patchItem.zh and patchItem.en and patchItem.zh ~= "" then
-                    table.insert(patches, { zh = patchItem.zh, en = patchItem.en })
-                end
-            end
+        local paragraphs = buildParagraphs(resolvedBody, glossary, patches)
+
+        if #paragraphs == 0 then
+            log_info("wtrlab: 0 paragraphs parsed")
+            return ""
         end
+
+        log_info("wtrlab: parsed " .. tostring(#paragraphs) .. " paragraphs")
+        return table.concat(paragraphs, "\n\n")
     end
 
-    local paragraphs = buildParagraphs(resolvedBody, glossary, patches)
-
-    if #paragraphs == 0 then
-        log_info("wtrlab: 0 paragraphs parsed")
-        return ""
-    end
-
-    log_info("wtrlab: parsed " .. tostring(#paragraphs) .. " paragraphs")
-    return table.concat(paragraphs, "\n\n")
+    log_error("wtrlab: unknown mode " .. mode)
+    return ""
 end
 
 -- termCache needs to be declared for the glossary logic above
