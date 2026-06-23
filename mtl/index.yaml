@@ -4,6 +4,6 @@ sources:
   - id: "wtrlab"
     name: "WTR-LAB"
     version: "1.1.4"
-    url: "https://raw.githubusercontent.com/HnDK0/external-sources/refs/heads/main/mtl/wtrlab.lua"
+    url: "https://raw.githubusercontent.com/Vaizer0/external-sources/refs/heads/main/mtl/wtrlab.lua"
     icon: "https://raw.githubusercontent.com/HnDK0/external-sources/main/icons/wtr-lab.png"
     language: "Mtl"
