@@ -1,9 +1,16 @@
 id       = "truthnovel"
 name     = "Truth Novel"
-version  = "1.0.0"
+version  = "1.0.1"
 baseUrl  = "https://truthnovel.top"
 language = "en"
 icon     = "https://truthnovel.top/wp-content/uploads/2024/02/الجديدة.jpg"
+
+local function absUrl(href)
+    if not href or href == "" then return "" end
+    if string_starts_with(href, "http") then return href end
+    if string_starts_with(href, "//") then return "https:" .. href end
+    return url_resolve(baseUrl, href)
+end
 
 function getCatalogList(index)
     if index > 0 then
@@ -51,11 +58,15 @@ function getChapterList(bookUrl)
     for _, a in ipairs(html_select(r.body, "a.post_title")) do
         table.insert(chapters, {
             title = string_clean(a.text),
-            url = a.href
+            url = absUrl(a.href)
         })
     end
 
     return chapters
+end
+
+function getChapterListHash(bookUrl)
+    return "truthnovel-v1"
 end
 
 function getChapterText(html, url)
@@ -65,5 +76,5 @@ function getChapterText(html, url)
         return ""
     end
 
-    return html_text(el.html)
+    return string_trim(html_text(el.html))
 end
