@@ -1,17 +1,17 @@
 -- ── Метаданные ───────────────────────────────────────────────────────────────
-id = "localpaste"
-name = "Local Paste (Copypaste)"
-version = "1.0.0"
-baseUrl = "local://"
+id       = "localpaste"
+name     = "Local Paste (Copypaste)"
+version  = "1.0.1"
+baseUrl  = "local://"
 language = "en"
-icon = ""
+icon     = ""
 
--- ── Константы ───────────────────────────────────────────────────────────────
+-- ── Константы ────────────────────────────────────────────────────────────────
 local STORAGE_KEY = "localpaste_chapters"
-local BOOK_TITLE = "Copypaste"
-local BOOK_URL = "local://book/copypaste"
+local BOOK_TITLE  = "Copypaste"
+local BOOK_URL    = "local://book/copypaste"
 
--- ── Вспомогательные функции ─────────────────────────────────────────────────
+-- ── Вспомогательные функции ──────────────────────────────────────────────────
 
 -- Загрузить массив глав (каждая глава – строка текста)
 local function loadChapters()
@@ -31,15 +31,15 @@ local function saveChapters(chapters)
     set_preference(STORAGE_KEY, json)
 end
 
--- Добавить главу
+-- Добавить главу (возвращает новый номер)
 local function addChapter(text)
     local chapters = loadChapters()
     table.insert(chapters, text)
     saveChapters(chapters)
-    return #chapters  -- новый номер главы
+    return #chapters
 end
 
--- Удалить главу по номеру (1‑based)
+-- Удалить главу по номеру (1‑based), возвращает успех
 local function deleteChapter(index)
     local chapters = loadChapters()
     if index >= 1 and index <= #chapters then
@@ -48,12 +48,6 @@ local function deleteChapter(index)
         return true
     end
     return false
-end
-
--- Получить количество глав
-local function getChapterCount()
-    local chapters = loadChapters()
-    return #chapters
 end
 
 -- Получить текст главы по номеру
@@ -65,7 +59,13 @@ local function getChapterTextByIndex(index)
     return nil
 end
 
--- ── Обязательные функции плагина ─────────────────────────────────────────────
+-- Получить количество глав
+local function getChapterCount()
+    local chapters = loadChapters()
+    return #chapters
+end
+
+-- ── Обязательные функции (согласно гайду) ───────────────────────────────────
 
 -- Каталог: всегда показываем одну книгу "Copypaste"
 function getCatalogList(index)
@@ -77,7 +77,7 @@ function getCatalogList(index)
         items = {
             {
                 title = BOOK_TITLE .. " (" .. count .. " chapters)",
-                url = BOOK_URL,
+                url   = BOOK_URL,
                 cover = ""
             }
         },
@@ -91,28 +91,7 @@ function getCatalogSearch(index, query)
         return { items = {}, hasNext = false }
     end
 
-    -- Команда: add=<текст>  – добавить главу
-    if query:match("^add=") then
-        local text = query:sub(5)  -- после "add="
-        text = string.trim(text)
-        if text == "" then
-            return {
-                items = { { title = "⚠️ Empty text, nothing added", url = "", cover = "" } },
-                hasNext = false
-            }
-        end
-        local newNum = addChapter(text)
-        return {
-            items = { {
-                title = "✅ Chapter " .. newNum .. " added (" .. newNum .. " total)",
-                url = "local://chapter/" .. tostring(newNum),
-                cover = ""
-            } },
-            hasNext = false
-        }
-    end
-
-    -- Команда: delete=<число> – удалить главу
+    -- Команда удаления: delete=<число>
     if query:match("^delete=") then
         local numStr = query:sub(8)  -- после "delete="
         local num = tonumber(numStr)
@@ -141,24 +120,23 @@ function getCatalogSearch(index, query)
         end
     end
 
-    -- Если обычный поиск – показываем книгу, если запрос совпадает с названием или пустой
-    local lowerQuery = string.lower(query)
-    if lowerQuery == "" or string.find(string.lower(BOOK_TITLE), lowerQuery, 1, true) then
-        local count = getChapterCount()
+    -- Всё остальное считается текстом новой главы
+    local text = string.trim(query)
+    if text == "" then
         return {
-            items = {
-                {
-                    title = BOOK_TITLE .. " (" .. count .. " chapters)",
-                    url = BOOK_URL,
-                    cover = ""
-                }
-            },
+            items = { { title = "⚠️ Empty text, nothing added", url = "", cover = "" } },
             hasNext = false
         }
     end
-
-    -- Ничего не найдено
-    return { items = {}, hasNext = false }
+    local newNum = addChapter(text)
+    return {
+        items = { {
+            title = "✅ Chapter " .. newNum .. " added (" .. newNum .. " total)",
+            url   = "local://chapter/" .. tostring(newNum),
+            cover = ""
+        } },
+        hasNext = false
+    }
 end
 
 -- Детали книги
@@ -170,7 +148,7 @@ function getBookTitle(bookUrl)
 end
 
 function getBookCoverImageUrl(bookUrl)
-    return nil
+    return nil  -- нет обложки
 end
 
 function getBookDescription(bookUrl)
@@ -195,7 +173,7 @@ function getChapterList(bookUrl)
     for i, ch in ipairs(chapters) do
         table.insert(result, {
             title = "Chapter " .. i,
-            url = "local://chapter/" .. tostring(i)
+            url   = "local://chapter/" .. tostring(i)
         })
     end
     return result
@@ -206,7 +184,7 @@ function getChapterListHash(bookUrl)
         return nil
     end
     local count = getChapterCount()
-    -- Хеш = количество глав + время последнего изменения (нет точного, используем os_time)
+    -- Хеш = количество глав + время последнего изменения (приблизительно)
     return tostring(count) .. ":" .. tostring(os_time())
 end
 
@@ -232,16 +210,16 @@ end
 function getSettingsSchema()
     return {
         {
-            key = "localpaste_help",
-            type = "text",
-            label = "How to use",
-            current = "Search 'add=text' to add a chapter. Search 'delete=N' to delete chapter N.",
+            key     = "localpaste_help",
+            type    = "text",
+            label   = "How to use",
+            current = "Search any text to add a chapter. Search 'delete=N' to delete chapter N.",
             options = {}
         }
     }
 end
 
--- ── Фильтры не поддерживаются ───────────────────────────────────────────────
+-- ── Фильтры (не поддерживаются) ─────────────────────────────────────────────
 
 function getFilterList()
     return {}
