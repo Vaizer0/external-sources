@@ -2,17 +2,15 @@
 -- Source: https://www.sonicmtl.com/
 -- Version: 1.6.0
 
--- ── Metadata ──────────────────────────────────────────────────────────────
-
 id       = "sonicmtl"
 name     = "Sonic MTL"
-version  = "1.0.0"
+version  = "1.6.0"
 baseUrl  = "https://www.sonicmtl.com"
-language = "mtl"          -- machine‑translated novels
+language = "mtl"
 icon     = "https://www.sonicmtl.com/wp-content/uploads/2021/09/sonicmtl-icon-1.png"
 charset  = "UTF-8"
 
--- ── Helpers ────────────────────────────────────────────────────────────────
+-- ── Helpers ──────────────────────────────────────────────────────────────
 
 local function absUrl(href)
     if not href or href == "" then return "" end
@@ -21,18 +19,14 @@ local function absUrl(href)
     return url_resolve(baseUrl, href)
 end
 
-local function applyStandardContentTransforms(text)
+local function cleanText(text)
     if not text or text == "" then return "" end
     text = string_normalize(text)
-    local domain = baseUrl:gsub("https?://", ""):gsub("^www%.", ""):gsub("/$", "")
-    text = regex_replace(text, "(?i)" .. domain .. ".*?\\n", "")
-    text = regex_replace(text, "(?i)\\A[\\s\\p{Z}\\uFEFF]*((Chapter|Глава)\\s+\\d+)[^\\n\\r]*[\\n\\r\\s]*", "")
-    text = regex_replace(text, "(?im)^\\s*(Translator|Editor|Proofreader|Read\\s+(at|on|latest))[:\\s][^\\n\\r]{0,70}(\\r?\\n|$)", "")
-    text = string_trim(text)
-    return text
+    text = text:gsub("\r\n", "\n"):gsub("\r", "\n")
+    text = text:gsub("\n%s*\n%s*\n+", "\n\n")
+    return string_trim(text)
 end
 
--- Cache for book pages (single request per book URL)
 local _pageCache = {}
 
 local function fetchPage(url)
@@ -45,157 +39,152 @@ local function fetchPage(url)
     return nil
 end
 
--- Extract numeric post ID from body class (e.g. postid-147851)
-local function extractNovelIdFromBody(body)
-    local id = regex_match(body, 'postid[%-_](%d+)')
-    if id and #id > 0 then return id[1] end
-    return nil
-end
+-- ── Catalog parsing ─────────────────────────────────────────────────────
 
--- ── Catalog parsing (Madara theme) ──────────────────────────────────────
+local function parseCard(cardHtml)
+    local titleEl =
+        html_select_first(cardHtml, ".item-summary .post-title a") or
+        html_select_first(cardHtml, ".post-title a") or
+        html_select_first(cardHtml, "h3 a") or
+        html_select_first(cardHtml, "a[title]")
+
+    local linkEl =
+        html_select_first(cardHtml, ".item-thumb a") or
+        html_select_first(cardHtml, ".item-summary .post-title a") or
+        html_select_first(cardHtml, ".post-title a") or
+        html_select_first(cardHtml, "a[title]")
+
+    if not titleEl or not linkEl then return nil end
+
+    local title = string_clean(titleEl.text or "")
+    local url = absUrl(linkEl.href or "")
+    if title == "" or url == "" then return nil end
+
+    local cover = html_attr(cardHtml, "img", "src")
+    if cover == "" then cover = html_attr(cardHtml, "img", "data-src") end
+    if cover == "" then cover = html_attr(cardHtml, "img", "data-lazy-src") end
+
+    return {
+        title = title,
+        url = url,
+        cover = absUrl(cover)
+    }
+end
 
 local function parseCatalogItems(body)
     local items = {}
-    local cards = html_select(body, ".page-item-detail .item-summary, .c-tabs-item__content, .novel-item, .book-item")
-    if #cards == 0 then
-        cards = html_select(body, ".row .col a[href*='/novel/']")
-    end
-    for _, card in ipairs(cards) do
-        local titleEl = html_select_first(card.html, "h3 a, h4 a, .title a, a[href*='/novel/']")
-        if not titleEl then
-            titleEl = html_select_first(card.html, "a[href*='/novel/']")
-        end
-        if titleEl then
-            local title = string_clean(titleEl.text)
-            local url = absUrl(titleEl.href)
-            if title ~= "" and url ~= "" then
-                local cover = html_attr(card.html, "img", "src")
-                if cover == "" then cover = html_attr(card.html, "img[src*='cover']", "src") end
-                cover = absUrl(cover)
-                table.insert(items, { title = title, url = url, cover = cover })
+    local seen = {}
+
+    local selectors = {
+        ".page-item-detail",
+        ".page-listing-item .page-item-detail",
+        ".c-tabs-item__content",
+        ".item-summary",
+        ".popular-item-wrap",
+        ".slider__item",
+    }
+
+    for _, sel in ipairs(selectors) do
+        for _, card in ipairs(html_select(body, sel)) do
+            local item = parseCard(card.html or card)
+            if item and not seen[item.url] then
+                seen[item.url] = true
+                table.insert(items, item)
             end
         end
     end
+
+    if #items == 0 then
+        for _, a in ipairs(html_select(body, "a[href*='/novel/']")) do
+            local href = absUrl(a.href or "")
+            local title = string_clean(a.text or "")
+            if href ~= "" and title ~= "" and not seen[href] then
+                seen[href] = true
+                table.insert(items, {
+                    title = title,
+                    url = href,
+                    cover = ""
+                })
+            end
+        end
+    end
+
     return items
 end
 
-local function hasNextPage(body)
-    local nextLink = html_select_first(body, ".nav-previous a, .pagination .next a, .pagination .next")
-    if nextLink then
-        local text = string_trim(nextLink.text)
-        if text == "" then text = nextLink.href or "" end
-        if string.find(text, "Next") or string.find(text, ">") or string.find(text, "→") then
-            return true
-        end
-        return true
-    end
-    return false
-end
+-- ── Chapter parsing ─────────────────────────────────────────────────────
 
--- ── Catalog ────────────────────────────────────────────────────────────────
-
-function getCatalogList(index)
-    local page = index + 1
-    local url = baseUrl .. "/novel/?page=" .. page
-    local r = http_get(url)
-    if not r.success then
-        if index == 0 then
-            r = http_get(baseUrl)
-            if not r.success then return { items = {}, hasNext = false } end
-        else
-            return { items = {}, hasNext = false }
-        end
-    end
-    local items = parseCatalogItems(r.body)
-    return { items = items, hasNext = hasNextPage(r.body) }
-end
-
--- ── Search ─────────────────────────────────────────────────────────────────
-
-function getCatalogSearch(index, query)
-    local page = index + 1
-    local url = baseUrl .. "/?s=" .. url_encode(query) .. "&post_type=wp-manga"
-    if page > 1 then
-        url = baseUrl .. "/page/" .. page .. "/?s=" .. url_encode(query) .. "&post_type=wp-manga"
-    end
-    local r = http_get(url)
-    if not r.success then return { items = {}, hasNext = false } end
-    local items = parseCatalogItems(r.body)
-    return { items = items, hasNext = hasNextPage(r.body) }
-end
-
--- ── Book Details (cached) ─────────────────────────────────────────────────
-
-function getBookTitle(bookUrl)
-    local body = fetchPage(bookUrl)
-    if not body then return nil end
-    local el = html_select_first(body, ".post-title h1, h1.title, .post-title")
-    return el and string_clean(el.text) or nil
-end
-
-function getBookCoverImageUrl(bookUrl)
-    local body = fetchPage(bookUrl)
-    if not body then return nil end
-    local cover = html_attr(body, ".summary_image img, .cover-image img, img[src*='cover']", "src")
-    if cover == "" then cover = html_attr(body, "meta[property='og:image']", "content") end
-    return cover ~= "" and absUrl(cover) or nil
-end
-
-function getBookDescription(bookUrl)
-    local body = fetchPage(bookUrl)
-    if not body then return nil end
-    local el = html_select_first(body, ".description-summary .summary__content, .novel-description, .summary__content")
-    return el and string_trim(el.text) or nil
-end
-
-function getBookGenres(bookUrl)
-    local body = fetchPage(bookUrl)
-    if not body then return {} end
-    local genres = {}
-    for _, a in ipairs(html_select(body, ".genres-content a, .genres a")) do
-        local label = string_trim(a.text)
-        if label ~= "" then table.insert(genres, label) end
-    end
-    return genres
-end
-
--- ── Chapter List (AJAX via admin-ajax.php) ──────────────────────────────
-
-local function getNovelId(bookUrl)
-    local body = fetchPage(bookUrl)
-    if not body then return nil end
-    return extractNovelIdFromBody(body)
-end
-
--- Fetch one page of chapters via AJAX
-local function fetchChaptersPage(novelId, page)
-    local url = baseUrl .. "/wp-admin/admin-ajax.php"
-    local body = "action=wp-manga-get-chapters&manga_id=" .. novelId .. "&paged=" .. page
-    local r = http_post(url, body, {
-        headers = {
-            ["X-Requested-With"] = "XMLHttpRequest",
-            ["Content-Type"] = "application/x-www-form-urlencoded",
-        }
-    })
-    if not r.success then return nil end
-    return r.body
-end
-
--- Parse chapters from AJAX HTML response
-local function parseChaptersFromHtml(html)
+local function parseChapterLinks(body, novelSlug)
     local chapters = {}
-    for _, li in ipairs(html_select(html, ".wp-manga-chapter")) do
-        local a = html_select_first(li.html, "a[href]")
-        if a and a.href and a.href ~= "" then
-            local title = string_clean(a.text)
-            if title == "" then title = "Chapter " .. #chapters + 1 end
-            table.insert(chapters, { title = title, url = absUrl(a.href) })
+    local seen = {}
+
+    local function addChapter(title, href)
+        href = absUrl(href or "")
+        title = string_clean(title or "")
+
+        if href == "" or title == "" or seen[href] then
+            return
+        end
+
+        if novelSlug and not href:find("/novel/" .. novelSlug .. "/") then
+            return
+        end
+
+        if not href:find("/chapter") and not href:find("chapter%-") then
+            return
+        end
+
+        seen[href] = true
+        table.insert(chapters, {
+            title = title,
+            url = href
+        })
+    end
+
+    for _, sel in ipairs({
+        ".wp-manga-chapter a",
+        ".listing-chapters_wrap a",
+        ".listing-chapters_wrap .wp-manga-chapter a",
+        ".chapters_selectbox_holder a",
+        ".chapter-item a",
+        ".chapter a",
+        "a.btn-link",
+        "a[href*='/chapter']",
+    }) do
+        for _, a in ipairs(html_select(body, sel)) do
+            addChapter(a.text or "", a.href or "")
         end
     end
-    return chapters
+
+    -- Sort numerically by chapter number (extracted from title or URL)
+    local numbered = {}
+    for _, ch in ipairs(chapters) do
+        local n = tonumber((ch.title or ""):match("^(%d+)")) or
+                  tonumber((ch.url or ""):match("chapter%-(%d+)")) or
+                  tonumber((ch.url or ""):match("/(%d+)%-[^/]+/?$")) or 0
+        table.insert(numbered, { n = n, title = ch.title, url = ch.url })
+    end
+
+    table.sort(numbered, function(a, b)
+        if a.n == b.n then
+            return a.url < b.url
+        end
+        return a.n < b.n
+    end)
+
+    local sorted = {}
+    for _, ch in ipairs(numbered) do
+        table.insert(sorted, {
+            title = ch.title,
+            url = ch.url
+        })
+    end
+
+    return sorted
 end
 
--- Get total number of pages from pagination in AJAX response
+-- ── AJAX chapter fetching with pagination ─────────────────────────────
+
 local function getTotalPagesFromHtml(html)
     local pagination = html_select_first(html, ".pagination, .page-numbers")
     if pagination then
@@ -214,213 +203,343 @@ local function getTotalPagesFromHtml(html)
     return 1
 end
 
--- getChapterList: fetch all pages, combine, reverse (oldest first)
-function getChapterList(bookUrl)
-    local novelId = getNovelId(bookUrl)
-    if not novelId then
-        log_error("sonicmtl: cannot extract novelId from " .. bookUrl)
-        return {}
-    end
+local function fetchAjaxPage(bookUrl, mangaId, page)
+    local novelSlug = bookUrl:match("/novel/([^/]+)/")
+    local attempts = {
+        {
+            url = bookUrl:gsub("/?$", "") .. "/ajax/chapters/?t=1&page=" .. page,
+            post = false
+        },
+        {
+            url = bookUrl:gsub("/?$", "") .. "/ajax/chapters/?page=" .. page,
+            post = false
+        },
+        {
+            url = baseUrl .. "/wp-admin/admin-ajax.php",
+            body = "action=wp-manga-get-chapters&manga_id=" .. mangaId .. "&paged=" .. page,
+            post = true
+        },
+        {
+            url = baseUrl .. "/wp-admin/admin-ajax.php",
+            body = "action=wp-manga-get-chapters&post_id=" .. mangaId .. "&paged=" .. page,
+            post = true
+        },
+    }
 
-    local html = fetchChaptersPage(novelId, 1)
-    if not html then return {} end
-    local totalPages = getTotalPagesFromHtml(html)
-    local allChapters = parseChaptersFromHtml(html)
+    for _, req in ipairs(attempts) do
+        local r
+        if req.post then
+            r = http_post(req.url, req.body, {
+                headers = {
+                    ["Content-Type"] = "application/x-www-form-urlencoded; charset=UTF-8",
+                    ["X-Requested-With"] = "XMLHttpRequest",
+                    ["Referer"] = bookUrl,
+                    ["Origin"] = baseUrl
+                }
+            })
+        else
+            r = http_get(req.url, {
+                headers = {
+                    ["X-Requested-With"] = "XMLHttpRequest",
+                    ["Referer"] = bookUrl
+                }
+            })
+        end
 
-    if totalPages > 1 then
-        for p = 2, totalPages do
-            local pageHtml = fetchChaptersPage(novelId, p)
-            if pageHtml then
-                local pageChapters = parseChaptersFromHtml(pageHtml)
-                for _, ch in ipairs(pageChapters) do
-                    table.insert(allChapters, ch)
-                end
+        if r and r.success and r.body and r.body ~= "" then
+            local chapters = parseChapterLinks(r.body, novelSlug)
+            if #chapters > 0 or page == 1 then
+                -- Return chapters and total pages from pagination
+                local total = getTotalPagesFromHtml(r.body)
+                return chapters, total
             end
-            sleep(150)
         end
     end
 
-    local reversed = {}
-    for i = #allChapters, 1, -1 do
-        table.insert(reversed, allChapters[i])
-    end
-    return reversed
+    return {}, 1
 end
 
--- Chapter hash: use the latest chapter link (direct HTTP, no cache)
+local function fetchAllChapters(bookUrl, mangaId)
+    local allChapters = {}
+    local firstChapters, totalPages = fetchAjaxPage(bookUrl, mangaId, 1)
+    for _, ch in ipairs(firstChapters) do
+        table.insert(allChapters, ch)
+    end
+
+    if totalPages > 1 then
+        for p = 2, totalPages do
+            local pageChapters, _ = fetchAjaxPage(bookUrl, mangaId, p)
+            for _, ch in ipairs(pageChapters) do
+                table.insert(allChapters, ch)
+            end
+            sleep(150) -- be gentle
+        end
+    end
+
+    return allChapters
+end
+
+-- ── Catalog ─────────────────────────────────────────────────────────────
+
+function getCatalogList(index)
+    local page = index + 1
+    local url = (page == 1) and (baseUrl .. "/novel/") or (baseUrl .. "/novel/page/" .. page .. "/")
+    local r = http_get(url)
+    if not r.success then return { items = {}, hasNext = false } end
+    local items = parseCatalogItems(r.body)
+    return { items = items, hasNext = #items > 0 }
+end
+
+function getCatalogSearch(index, query)
+    local page = index + 1
+    local url = (page == 1)
+        and (baseUrl .. "/?s=" .. url_encode(query) .. "&post_type=wp-manga")
+        or (baseUrl .. "/page/" .. page .. "/?s=" .. url_encode(query) .. "&post_type=wp-manga")
+    local r = http_get(url)
+    if not r.success then return { items = {}, hasNext = false } end
+    local items = parseCatalogItems(r.body)
+    return { items = items, hasNext = #items > 0 }
+end
+
+-- ── Book Details ────────────────────────────────────────────────────────
+
+function getBookTitle(bookUrl)
+    local body = fetchPage(bookUrl)
+    if not body then return nil end
+    local el = html_select_first(body, ".post-title h1") or html_select_first(body, "h1")
+    if el and el.text and el.text ~= "" then
+        return string_clean(el.text)
+    end
+    local og = html_select_first(body, "meta[property='og:title']")
+    if og and og.content and og.content ~= "" then
+        local t = string_clean(og.content)
+        t = t:gsub("%s*MTL and Audiobook$", ""):gsub("%s*MTL$", "")
+        return t
+    end
+    return nil
+end
+
+function getBookCoverImageUrl(bookUrl)
+    local body = fetchPage(bookUrl)
+    if not body then return nil end
+    local og = html_select_first(body, "meta[property='og:image']")
+    if og and og.content and og.content ~= "" then
+        return absUrl(og.content)
+    end
+    local img = html_select_first(body, ".summary_image img") or html_select_first(body, ".item-thumb img")
+    if img then
+        local src = img.src or img["data-src"] or img["data-lazy-src"] or ""
+        if src ~= "" then return absUrl(src) end
+    end
+    return nil
+end
+
+function getBookDescription(bookUrl)
+    local body = fetchPage(bookUrl)
+    if not body then return nil end
+    local og = html_select_first(body, "meta[property='og:description']")
+    if og and og.content and og.content ~= "" then
+        return string_clean(og.content)
+    end
+    local el = html_select_first(body, ".summary__content") or
+               html_select_first(body, ".description-summary .summary__content") or
+               html_select_first(body, ".description-summary")
+    if el and el.text and el.text ~= "" then
+        return cleanText(el.text)
+    end
+    return nil
+end
+
+function getBookGenres(bookUrl)
+    local body = fetchPage(bookUrl)
+    if not body then return {} end
+    local genres = {}
+    local seen = {}
+    for _, a in ipairs(html_select(body, ".genres-content a, .genres_wrap a.btn-genres, .post-content_item a[href*='/novel-genre/']")) do
+        local g = string_clean(a.text or "")
+        if g ~= "" and not seen[g] then
+            seen[g] = true
+            table.insert(genres, g)
+        end
+    end
+    return genres
+end
+
+-- ── Chapter List (with pagination) ─────────────────────────────────────
+
+function getChapterList(bookUrl)
+    local body = fetchPage(bookUrl)
+    if not body then return {} end
+
+    local novelSlug = bookUrl:match("/novel/([^/]+)/")
+    local chapters = parseChapterLinks(body, novelSlug)
+    if #chapters > 0 then
+        return chapters
+    end
+
+    local mangaId = html_attr(body, "#manga-chapters-holder", "data-id")
+    if not mangaId or mangaId == "" then
+        mangaId = body:match('"manga_id":"(%d+)"') or body:match('data%-id="(%d+)"')
+    end
+
+    if mangaId and mangaId ~= "" then
+        chapters = fetchAllChapters(bookUrl, mangaId)
+        if #chapters > 0 then
+            return chapters
+        end
+    end
+
+    return {}
+end
+
+-- ── Chapter hash (for updates) ────────────────────────────────────────
+
 function getChapterListHash(bookUrl)
-    local novelId = getNovelId(bookUrl)
-    if not novelId then return nil end
-    local html = fetchChaptersPage(novelId, 1)
-    if not html then return nil end
-    local a = html_select_first(html, ".wp-manga-chapter:first-child a")
-    return a and a.href or nil
+    local chapters = getChapterList(bookUrl)
+    if #chapters == 0 then return bookUrl end
+    local first = chapters[1] and chapters[1].url or ""
+    local last = chapters[#chapters] and chapters[#chapters].url or ""
+    return tostring(#chapters) .. ":" .. first .. ":" .. last
 end
 
--- ── Paginated Chapter List (parsePage) ─────────────────────────────────
-
-function parsePage(bookUrl, page)
-    local novelId = getNovelId(bookUrl)
-    if not novelId then
-        return { chapters = {}, totalPages = 1 }
-    end
-
-    local html1 = fetchChaptersPage(novelId, 1)
-    if not html1 then
-        return { chapters = {}, totalPages = 1 }
-    end
-    local total = getTotalPagesFromHtml(html1)
-    if total < 1 then total = 1 end
-
-    -- Invert: engine page 1 → site page total (oldest)
-    local sitePage = total - page + 1
-    if sitePage < 1 then sitePage = 1 end
-    if sitePage > total then sitePage = total end
-
-    local html = fetchChaptersPage(novelId, sitePage)
-    if not html then
-        return { chapters = {}, totalPages = total }
-    end
-
-    local chapters = parseChaptersFromHtml(html)
-    local reversed = {}
-    for i = #chapters, 1, -1 do
-        table.insert(reversed, chapters[i])
-    end
-    return { chapters = reversed, totalPages = total }
-end
-
--- ── Chapter Text ───────────────────────────────────────────────────────────
+-- ── Chapter Text ────────────────────────────────────────────────────────
 
 function getChapterText(html, url)
-    local cleaned = html_remove(html,
-        "script", "style",
-        ".ads", ".advertisement",
-        ".chapter-nav", ".nav-links",
-        "#comments", ".disqus"
-    )
+    if not html or html == "" then return "" end
 
-    local selectors = {
-        ".reading-content .text-left",
-        ".entry-content .reading-content",
-        ".chapter-content",
-        ".content-area",
-        ".text-content",
-        "#content"
-    }
-    local el = nil
-    for _, sel in ipairs(selectors) do
-        el = html_select_first(cleaned, sel)
-        if el then break end
-    end
-    if not el then
-        el = html_select_first(cleaned, "body")
-        if not el then return "" end
-    end
-    return applyStandardContentTransforms(html_text(el.html))
+    html = html:gsub("<script.-</script>", "")
+    html = html:gsub("<style.-</style>", "")
+    html = html:gsub("<!%-%-.-%-%->", "")
+
+    local el = html_select_first(html, ".reading-content .text-left") or
+               html_select_first(html, ".reading-content") or
+               html_select_first(html, ".entry-content .entry-content_wrap") or
+               html_select_first(html, ".entry-content") or
+               html_select_first(html, ".chapter-content") or
+               html_select_first(html, "#content") or
+               html_select_first(html, "article")
+
+    if not el then return "" end
+
+    local text = html_text(el.html or "")
+    text = cleanText(text)
+
+    text = text:gsub("Listen to this Chapter", "")
+    text = text:gsub("Read More", "")
+    text = text:gsub("Previous", "")
+    text = text:gsub("Next", "")
+    text = text:gsub("Report this chapter", "")
+    text = cleanText(text)
+
+    return text
 end
 
--- ── Filters ────────────────────────────────────────────────────────────────
+-- ── Filters ─────────────────────────────────────────────────────────────
 
 function getFilterList()
     return {
         {
-            type         = "select",
-            key          = "m_orderby",
-            label        = "Order By",
+            type = "select",
+            key = "m_orderby",
+            label = "Order By",
             defaultValue = "rating",
             options = {
-                { value = "rating",     label = "Rating"      },
-                { value = "latest",     label = "Latest"      },
-                { value = "alphabet",   label = "A–Z"         },
-                { value = "trending",   label = "Trending"    },
-                { value = "views",      label = "Most Views"  },
-                { value = "new-manga",  label = "New"         },
-                { value = "",           label = "Relevance"   },
+                { value = "rating",    label = "Rating" },
+                { value = "latest",    label = "Latest" },
+                { value = "alphabet",  label = "A-Z" },
+                { value = "trending",  label = "Trending" },
+                { value = "views",     label = "Most Views" },
+                { value = "new-manga", label = "New" },
+                { value = "",          label = "Relevance" },
             }
         },
         {
-            type  = "checkbox",
-            key   = "genre",
+            type = "checkbox",
+            key = "genre",
             label = "Genres",
             options = {
-                { value = "action",         label = "Action"         },
-                { value = "adventure",      label = "Adventure"      },
-                { value = "comedy",         label = "Comedy"         },
-                { value = "drama",          label = "Drama"          },
-                { value = "fantasy",        label = "Fantasy"        },
-                { value = "historical",     label = "Historical"     },
-                { value = "horror",         label = "Horror"         },
-                { value = "martial-arts",   label = "Martial Arts"   },
-                { value = "mystery",        label = "Mystery"        },
-                { value = "psychological",  label = "Psychological"  },
-                { value = "romance",        label = "Romance"        },
-                { value = "sci-fi",         label = "Sci-fi"         },
-                { value = "shounen",        label = "Shounen"        },
-                { value = "slice-of-life",  label = "Slice of Life"  },
-                { value = "supernatural",   label = "Supernatural"   },
-                { value = "xianxia",        label = "Xianxia"        },
-                { value = "xuanhuan",       label = "Xuanhuan"       },
+                { value = "action",        label = "Action" },
+                { value = "adventure",     label = "Adventure" },
+                { value = "comedy",        label = "Comedy" },
+                { value = "drama",         label = "Drama" },
+                { value = "eastern",       label = "Eastern" },
+                { value = "fantasy",       label = "Fantasy" },
+                { value = "game",          label = "Game" },
+                { value = "historical",    label = "Historical" },
+                { value = "horror",        label = "Horror" },
+                { value = "josei",         label = "Josei" },
+                { value = "martial-arts",  label = "Martial Arts" },
+                { value = "mystery",       label = "Mystery" },
+                { value = "psychological", label = "Psychological" },
+                { value = "romance",       label = "Romance" },
+                { value = "school-life",   label = "School Life" },
+                { value = "sci-fi",        label = "Sci-fi" },
+                { value = "shounen",       label = "Shounen" },
+                { value = "slice-of-life", label = "Slice of Life" },
+                { value = "supernatural",  label = "Supernatural" },
+                { value = "urban",         label = "Urban" },
+                { value = "wuxia",         label = "Wuxia" },
+                { value = "xianxia",       label = "Xianxia" },
+                { value = "xuanhuan",      label = "Xuanhuan" },
             }
         },
         {
-            type         = "select",
-            key          = "op",
-            label        = "Genres Condition",
+            type = "select",
+            key = "op",
+            label = "Genres Condition",
             defaultValue = "",
             options = {
-                { value = "",  label = "OR (any selected)" },
-                { value = "1", label = "AND (all selected)" },
+                { value = "",  label = "OR (having one of selected genres)" },
+                { value = "1", label = "AND (having all selected genres)" },
             }
         },
         {
-            type         = "select",
-            key          = "adult",
-            label        = "Adult Content",
+            type = "select",
+            key = "adult",
+            label = "Adult Content",
             defaultValue = "",
             options = {
-                { value = "",  label = "All"               },
-                { value = "0", label = "None adult"        },
-                { value = "1", label = "Only adult"        },
+                { value = "",  label = "All" },
+                { value = "0", label = "None adult content" },
+                { value = "1", label = "Only adult content" },
             }
         },
         {
-            type  = "checkbox",
-            key   = "status",
+            type = "checkbox",
+            key = "status",
             label = "Status",
             options = {
-                { value = "on-going",  label = "Ongoing"   },
-                { value = "end",       label = "Completed" },
-                { value = "canceled",  label = "Canceled"  },
-                { value = "on-hold",   label = "On Hold"   },
-                { value = "upcoming",  label = "Upcoming"  },
+                { value = "on-going", label = "On Going" },
+                { value = "end",      label = "Completed" },
+                { value = "canceled", label = "Canceled" },
+                { value = "on-hold",  label = "On Hold" },
+                { value = "upcoming", label = "Upcoming" },
             }
         },
         {
-            type         = "text",
-            key          = "author",
-            label        = "Author",
+            type = "text",
+            key = "author",
+            label = "Author",
             defaultValue = ""
         },
         {
-            type         = "text",
-            key          = "release",
-            label        = "Year Released",
+            type = "text",
+            key = "release",
+            label = "Year of Released",
             defaultValue = ""
         },
     }
 end
 
--- ── Catalog with Filters ──────────────────────────────────────────────────
-
 function getCatalogFiltered(index, filters)
-    local page = index + 1
+    local page    = index + 1
     local orderby = filters["m_orderby"] or "rating"
-    local op = filters["op"] or ""
-    local adult = filters["adult"] or ""
-    local author = filters["author"] or ""
+    local op      = filters["op"] or ""
+    local adult   = filters["adult"] or ""
+    local author  = filters["author"] or ""
+    local artist  = filters["artist"] or ""
     local release = filters["release"] or ""
-    local genres = filters["genre_included"] or {}
+    local genres  = filters["genre_included"] or {}
     local statuses = filters["status_included"] or {}
 
     local basePath = ""
@@ -436,6 +555,9 @@ function getCatalogFiltered(index, filters)
     if author ~= "" then
         url = url .. "&author=" .. url_encode(author)
     end
+    if artist ~= "" then
+        url = url .. "&artist=" .. url_encode(artist)
+    end
     if release ~= "" then
         url = url .. "&release=" .. url_encode(release)
     end
@@ -448,10 +570,15 @@ function getCatalogFiltered(index, filters)
     end
 
     local r = http_get(url)
-    if not r.success then return { items = {}, hasNext = false } end
+    if not r.success then
+        return { items = {}, hasNext = false }
+    end
 
     local items = parseCatalogItems(r.body)
-    return { items = items, hasNext = hasNextPage(r.body) }
+    return {
+        items = items,
+        hasNext = #items > 0
+    }
 end
 
--- ── End of plugin ─────────────────────────────────────────────────────────
+-- ── End of plugin ──────────────────────────────────────────────────────
