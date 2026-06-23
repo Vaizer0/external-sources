@@ -3,7 +3,7 @@ id = "wtrlab"
 name = "WTR-LAB"
 version = "2.0.2"
 baseUrl = "https://wtr-lab.com/"
-language = "mtl"
+language = "Mtl"
 icon = "https://raw.githubusercontent.com/HnDK0/external-sources/main/icons/wtr-lab.png"
 
 -- ── Настройки ────────────────────────────────────────────────────────────────
