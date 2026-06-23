@@ -1,15 +1,15 @@
 -- ── Метаданные ───────────────────────────────────────────────────────────────
 id       = "localpaste"
 name     = "Local Paste"
-version  = "1.0.0"
-baseUrl  = "https://example.com/"
+version  = "1.0.1"
+baseUrl  = "http://neverssl.com/"
 language = "en"
 icon     = "https://raw.githubusercontent.com/Vaizer0/external-sources/refs/heads/main/icons/vaizero.png"
 
 -- ── Константы ────────────────────────────────────────────────────────────────
 local STORAGE_KEY = "localpaste_chapters"
 local BOOK_TITLE  = "Copypaste"
-local BOOK_URL    = "https://example.com/?book=copypaste"
+local BOOK_URL    = "http://neverssl.com/?book=copypaste"
 
 -- ── Вспомогательные функции ──────────────────────────────────────────────────
 
@@ -114,7 +114,7 @@ function getCatalogSearch(index, query)
     return {
         items = { {
             title = "✅ Chapter " .. newNum .. " added (" .. newNum .. " total)",
-            url   = "https://example.com/?chapter=" .. tostring(newNum),
+            url   = "http://neverssl.com/?chapter=" .. tostring(newNum),
             cover = ""
         } },
         hasNext = false
@@ -148,7 +148,7 @@ function getChapterList(bookUrl)
     for i, _ in ipairs(chapters) do
         table.insert(result, {
             title = "Chapter " .. i,
-            url   = "https://example.com/?chapter=" .. tostring(i)
+            url   = "http://neverssl.com/?chapter=" .. tostring(i)
         })
     end
     return result
@@ -160,6 +160,7 @@ function getChapterListHash(bookUrl)
 end
 
 function getChapterText(html, chapterUrl)
+    -- Extract chapter number from the query parameter "?chapter=N"
     local num = tonumber(string.match(chapterUrl, "chapter=(%d+)"))
     if not num then
         num = tonumber(string.match(chapterUrl, "/chapter/(%d+)"))
