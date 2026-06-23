@@ -3,7 +3,7 @@ name     = "Truth Novel"
 version  = "1.0.9"
 baseUrl  = "https://truthnovel.top"
 language = "en"
-icon     = "https://truthnovel.top/wp-content/uploads/2024/02/Ø§Ù„Ø¬Ø¯ÙŠØ¯Ø©.jpg"
+icon     = "https://truthnovel.top/wp-content/uploads/2024/12/%D9%86%D8%B3%D8%AE%D8%A9-%D8%A7%D9%84%D9%81%D8%B5%D9%84-%D8%A7%D9%84%D9%81-%D8%A7%D9%84%D8%B5%D8%BA%D9%8A%D8%B1%D8%A9-%D9%84%D9%84%D9%85%D9%88%D9%82%D8%B9-%D8%A7%D9%84%D8%B9%D8%B1%D8%A8%D9%8A.jpg"
 
 local function absUrl(href)
     if not href or href == "" then
