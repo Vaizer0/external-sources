@@ -1,20 +1,32 @@
 id       = "truthnovel"
 name     = "Truth Novel"
-version  = "1.0.3"
+version  = "1.0.5"
 baseUrl  = "https://truthnovel.top"
 language = "en"
 icon     = "https://truthnovel.top/wp-content/uploads/2024/02/الجديدة.jpg"
 
 local function absUrl(href)
-    if not href or href == "" then return "" end
-    if string_starts_with(href, "http") then return href end
-    if string_starts_with(href, "//") then return "https:" .. href end
+    if not href or href == "" then
+        return ""
+    end
+
+    if string_starts_with(href, "http") then
+        return href
+    end
+
+    if string_starts_with(href, "//") then
+        return "https:" .. href
+    end
+
     return url_resolve(baseUrl, href)
 end
 
 function getCatalogList(index)
     if index > 0 then
-        return { items = {}, hasNext = false }
+        return {
+            items = {},
+            hasNext = false
+        }
     end
 
     return {
@@ -46,78 +58,143 @@ function getBookDescription(bookUrl)
 end
 
 function getBookGenres(bookUrl)
-    return {"Fantasy"}
+    return {
+        "Fantasy"
+    }
 end
 
 function getChapterList(bookUrl)
 
     local r = http_get(bookUrl)
+
     if not r.success then
         return {}
     end
 
     local chapters = {}
 
+    -- First selector
     for _, a in ipairs(html_select(r.body, "a.post_title")) do
-
-        local title = string_clean(a.text)
-        local url = absUrl(a.href)
-
-        if title ~= "" and url ~= "" then
-            table.insert(chapters, {
-                title = title,
-                url = url
-            })
-        end
+        table.insert(chapters, {
+            title = string_clean(a.text),
+            url = absUrl(a.href)
+        })
     end
 
-    table.sort(chapters, function(a,b)
-        local na = tonumber(a.title:match("^(%d+)")) or 0
-        local nb = tonumber(b.title:match("^(%d+)")) or 0
-        return na < nb
-    end)
+    -- Backup selector
+    if #chapters == 0 then
+        for _, a in ipairs(html_select(r.body, "a")) do
+            if a.href and string.find(a.href, baseUrl) then
+                local t = string_clean(a.text)
+
+                if t ~= "" and string.match(t, "^%d+") then
+                    table.insert(chapters, {
+                        title = t,
+                        url = absUrl(a.href)
+                    })
+                end
+            end
+        end
+    end
 
     return chapters
 end
 
 function getChapterListHash(bookUrl)
-    return "truthnovel-v1"
+    return "truthnovel-v5"
 end
 
 function getChapterText(html, url)
 
-    html = html_remove(
-        html,
-        "script",
-        "style",
-        "nav",
-        "footer",
-        "aside",
-        ".comments-area",
-        ".comment-respond",
-        ".sidebar",
-        ".widget",
-        ".sharedaddy"
-    )
+    local startPos =
+        string.find(
+            html,
+            '<a href=".-" class="next%-post">'
+        )
 
-    local el =
-        html_select_first(html, ".entry-content")
-        or html_select_first(html, "article .entry-content")
-        or html_select_first(html, "article")
-        or html_select_first(html, "main")
+    if not startPos then
+        startPos =
+            string.find(
+                html,
+                '<article class="small single">'
+            )
+    end
 
-    if not el then
+    local endPos =
+        string.find(
+            html,
+            '<div class="post%-views'
+        )
+
+    if not endPos then
+        endPos =
+            string.find(
+                html,
+                '<div class="post%-share'
+            )
+    end
+
+    if not startPos or not endPos then
+
+        local article =
+            html:match(
+                '<article.-</article>'
+            )
+
+        if article then
+            return string_trim(
+                html_to_text(article)
+            )
+        end
+
         return ""
     end
 
-    local text = html_text(el.html)
+    local content =
+        string.sub(
+            html,
+            startPos,
+            endPos - 1
+        )
 
-    text = regex_replace(text, "@context.*?Novel Stories", "")
-    text = regex_replace(text, "التعليقات.*", "")
-    text = regex_replace(text, "Leave a Reply.*", "")
-    text = regex_replace(text, "شارك.*", "")
+    content =
+        content:gsub(
+            "<script.-</script>",
+            ""
+        )
 
-    text = string_trim(text)
+    content =
+        content:gsub(
+            "<style.-</style>",
+            ""
+        )
 
-    return text
+    content =
+        content:gsub(
+            "<hr ?/?>",
+            "\n\n"
+        )
+
+    content =
+        content:gsub(
+            "<br ?/?>",
+            "\n"
+        )
+
+    content =
+        content:gsub(
+            "</p>",
+            "\n\n"
+        )
+
+    local text =
+        html_to_text(content)
+
+    text =
+        text:gsub(
+            "الموضوع التالي.-\n",
+            ""
+        )
+
+    return string_trim(text)
 end
