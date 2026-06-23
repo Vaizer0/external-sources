@@ -17,7 +17,7 @@ sources:
     name: "Local Paste (Copypaste)"
     version: "1.0.0"
     url: "https://raw.githubusercontent.com/Vaizer0/external-sources/refs/heads/main/en/localpaste.lua"
-    icon: "https://raw.githubusercontent.com/Vaizer0/external-sources/refs/heads/main/icons/localpaste.png"
+    icon: "https://raw.githubusercontent.com/Vaizer0/external-sources/refs/heads/main/icons/vaizero.png"
     language: "en"
   - id: "nobadnovel"
     name: "NoBadNovel"
