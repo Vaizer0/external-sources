@@ -1,15 +1,15 @@
 -- ── Метаданные ───────────────────────────────────────────────────────────────
 id       = "localpaste"
 name     = "Local Paste (Copypaste)"
-version  = "1.0.2"
-baseUrl  = "https://localpaste.example.com"   -- valid HTTPS placeholder
+version  = "1.0.0"
+baseUrl  = "https://httpbin.org/"
 language = "en"
 icon     = "https://raw.githubusercontent.com/Vaizer0/external-sources/refs/heads/main/icons/vaizero.png"
 
 -- ── Константы ────────────────────────────────────────────────────────────────
 local STORAGE_KEY = "localpaste_chapters"
 local BOOK_TITLE  = "Copypaste"
-local BOOK_URL    = "https://localpaste.example.com/book/copypaste"
+local BOOK_URL    = "https://httpbin.org/status/200?book=copypaste"
 
 -- ── Вспомогательные функции ──────────────────────────────────────────────────
 
@@ -113,7 +113,7 @@ function getCatalogSearch(index, query)
     end
 
     -- Add new chapter (any text that is not a delete command)
-    local text = string_trim(query)   -- ← FIXED: use string_trim (not string.trim)
+    local text = string_trim(query)
     if text == "" then
         return { items = { { title = "⚠️ Empty text, nothing added", url = "", cover = "" } }, hasNext = false }
     end
@@ -121,7 +121,7 @@ function getCatalogSearch(index, query)
     return {
         items = { {
             title = "✅ Chapter " .. newNum .. " added (" .. newNum .. " total)",
-            url   = "https://localpaste.example.com/chapter/" .. tostring(newNum),
+            url   = "https://httpbin.org/status/200?chapter=" .. tostring(newNum),
             cover = ""
         } },
         hasNext = false
@@ -155,7 +155,7 @@ function getChapterList(bookUrl)
     for i, _ in ipairs(chapters) do
         table.insert(result, {
             title = "Chapter " .. i,
-            url   = "https://localpaste.example.com/chapter/" .. tostring(i)
+            url   = "https://httpbin.org/status/200?chapter=" .. tostring(i)
         })
     end
     return result
@@ -167,7 +167,8 @@ function getChapterListHash(bookUrl)
 end
 
 function getChapterText(html, chapterUrl)
-    local num = tonumber(string.match(chapterUrl, "/chapter/(%d+)$"))
+    -- Extract chapter number from the query parameter "?chapter=N"
+    local num = tonumber(string.match(chapterUrl, "chapter=(%d+)"))
     if not num then
         log_error("localpaste: cannot parse chapter number from " .. tostring(chapterUrl))
         return ""
