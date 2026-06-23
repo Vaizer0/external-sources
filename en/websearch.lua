@@ -1,9 +1,9 @@
 -- ── Метаданные ───────────────────────────────────────────────────────────────
 id       = "websearch"
 name     = "Web Search"
-version  = "1.0.0"
+version  = "1.0.1"
 baseUrl  = "https://www.google.com/"
-language = "en"
+language = "EN"
 icon     = "https://github.com/Vaizer0/external-sources/blob/main/icons/websearch.png?raw=true"
 charset  = "UTF-8"
 
@@ -24,7 +24,6 @@ local function absUrl(href, base)
     return url_resolve(base or baseUrl, href)
 end
 
--- Retry wrapper (as per guide)
 local function http_get_retry(url, config, retries)
     retries = retries or 3
     for attempt = 1, retries do
@@ -36,7 +35,6 @@ local function http_get_retry(url, config, retries)
     return { success = false, code = 0, body = "" }
 end
 
--- Standard text cleaning (from guide)
 local function applyStandardContentTransforms(text)
     if not text or text == "" then return "" end
     text = string_normalize(text)
@@ -46,7 +44,7 @@ local function applyStandardContentTransforms(text)
     return text
 end
 
--- ── Каталог (пустой – используется только поиск) ──────────────────────────
+-- ── Каталог (пустой) ──────────────────────────────────────────────────────────
 
 function getCatalogList(index)
     return { items = {}, hasNext = false }
@@ -75,7 +73,6 @@ function getCatalogSearch(index, query)
         headers = {
             ["Accept"] = "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
             ["Accept-Language"] = "en-US,en;q=0.5"
-            -- User-Agent and Referer are added automatically by the engine
         }
     }, 2)
 
@@ -88,21 +85,21 @@ function getCatalogSearch(index, query)
     local items = {}
 
     if engine == "google" then
-        -- Google result blocks: <div class="g"> or <div data-sokoban-container>
-        for _, block in ipairs(html_select(html, "div.g, div[data-sokoban-container]")) do
-            local titleEl = html_select_first(block.html, "a[href^='/url?']")
+        local blocks = html_select(html, "div.g, div[data-sokoban-container], div[class*='yuRUbf']")
+        for _, block in ipairs(blocks) do
+            local titleEl = html_select_first(block.html, "a[href^='/url?'], a[href^='http']")
             if titleEl then
-                local title = html_select_first(block.html, "h3")
+                local title = html_select_first(block.html, "h3, h2, h1, div[role='heading']")
                 if title then
                     title = string_clean(title.text)
                 else
                     title = string_clean(titleEl.text) or "Untitled"
                 end
                 local link = titleEl.href
-                -- Extract real URL from Google redirect
-                local realUrl = string.match(link, "q=([^&]+)")
-                if realUrl then
-                    realUrl = url_decode(realUrl)
+                local realUrl
+                if string_starts_with(link, "/url?") then
+                    realUrl = string.match(link, "q=([^&]+)")
+                    if realUrl then realUrl = url_decode(realUrl) end
                 else
                     realUrl = absUrl(link, "https://www.google.com")
                 end
@@ -110,7 +107,7 @@ function getCatalogSearch(index, query)
                     table.insert(items, {
                         title = title,
                         url   = realUrl,
-                        cover = ""  -- no cover for generic pages
+                        cover = ""
                     })
                 end
             end
@@ -120,16 +117,18 @@ function getCatalogSearch(index, query)
             local title = string_clean(a.text)
             local link = a.href
             if link and title ~= "" then
-                table.insert(items, {
-                    title = title,
-                    url   = absUrl(link, "https://html.duckduckgo.com"),
-                    cover = ""
-                })
+                local fullUrl = absUrl(link, "https://html.duckduckgo.com")
+                if fullUrl ~= "" then
+                    table.insert(items, {
+                        title = title,
+                        url   = fullUrl,
+                        cover = ""
+                    })
+                end
             end
         end
     end
 
-    -- Determine if there's a next page (simple heuristic: if we got at least 10 items)
     local hasNext = #items >= 10
     return { items = items, hasNext = hasNext }
 end
@@ -154,7 +153,7 @@ function getBookDescription(bookUrl)
 end
 
 function getChapterListHash(bookUrl)
-    return "1"  -- single chapter, always the same
+    return "1"
 end
 
 -- ── Список глав (всегда одна глава) ────────────────────────────────────────
@@ -169,7 +168,6 @@ end
 -- ── Текст главы (содержимое страницы) ─────────────────────────────────────
 
 local function cleanWebPageText(html)
-    -- Remove scripts, styles, navigation, ads, etc.
     local cleaned = html_remove(html,
         "script", "style", "noscript",
         "nav", "footer", "aside",
@@ -177,12 +175,10 @@ local function cleanWebPageText(html)
     )
     local body = html_select_first(cleaned, "body")
     if not body then
-        -- Fallback: entire document
         local text = html_text(cleaned)
         return applyStandardContentTransforms(text)
     end
     local text = html_text(body.html)
-    -- Collapse multiple newlines
     text = string_normalize(text)
     text = regex_replace(text, "\\n\\s*\\n", "\n\n")
     return applyStandardContentTransforms(text)
@@ -199,7 +195,6 @@ function getChapterText(html, chapterUrl)
 
     log_info("websearch: fetching page " .. chapterUrl)
 
-    -- If html is provided (from engine), we could use it, but we fetch fresh to avoid cache issues
     local r = http_get_retry(chapterUrl, {
         headers = {
             ["Accept"] = "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
@@ -223,7 +218,7 @@ function getChapterText(html, chapterUrl)
     return text
 end
 
--- ── Настройки плагина ──────────────────────────────────────────────────────
+-- ── Настройки ──────────────────────────────────────────────────────────────────
 
 function getSettingsSchema()
     return {{
@@ -238,7 +233,7 @@ function getSettingsSchema()
     }}
 end
 
--- ── Неиспользуемые, но обязательные функции (заглушки) ──────────────────────
+-- ── Заглушки ──────────────────────────────────────────────────────────────────
 
 function getBookGenres(bookUrl)
     return {}
