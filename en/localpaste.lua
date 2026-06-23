@@ -1,15 +1,15 @@
 -- ── Метаданные ───────────────────────────────────────────────────────────────
 id       = "localpaste"
 name     = "Local Paste"
-version  = "1.0.0"
-baseUrl  = "https://example.com/"
+version  = "1.0.2"
+baseUrl  = "https://httpbin.org/"
 language = "en"
 icon     = "https://raw.githubusercontent.com/Vaizer0/external-sources/refs/heads/main/icons/vaizero.png"
 
 -- ── Константы ────────────────────────────────────────────────────────────────
 local STORAGE_KEY = "localpaste_chapters"
 local BOOK_TITLE  = "Copypaste"
-local BOOK_URL    = "https://example.com/?book=copypaste"
+local BOOK_URL    = "https://httpbin.org/html?book=copypaste"   -- always returns a sample HTML page
 
 -- ── Вспомогательные функции ──────────────────────────────────────────────────
 
@@ -121,7 +121,7 @@ function getCatalogSearch(index, query)
     return {
         items = { {
             title = "✅ Chapter " .. newNum .. " added (" .. newNum .. " total)",
-            url   = "https://example.com/?chapter=" .. tostring(newNum),
+            url   = "https://httpbin.org/html?chapter=" .. tostring(newNum),
             cover = ""
         } },
         hasNext = false
@@ -155,7 +155,7 @@ function getChapterList(bookUrl)
     for i, _ in ipairs(chapters) do
         table.insert(result, {
             title = "Chapter " .. i,
-            url   = "https://example.com/?chapter=" .. tostring(i)
+            url   = "https://httpbin.org/html?chapter=" .. tostring(i)
         })
     end
     return result
