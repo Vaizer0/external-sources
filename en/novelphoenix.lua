@@ -4,7 +4,7 @@
 
 id       = "novelphoenix"
 name     = "Novel Phoenix"
-version  = "1.0.2"
+version  = "1.0.3"
 baseUrl  = "https://novelphoenix.com"
 language = "en"
 icon     = "https://novelphoenix.com/logo.png"
