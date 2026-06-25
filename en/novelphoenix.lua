@@ -1,15 +1,14 @@
 -- Novel Phoenix plugin for NovaLa
 -- Source: https://novelphoenix.com/
--- Version: 1.0.2
+-- Version: 1.0.3
 
 id       = "novelphoenix"
 name     = "Novel Phoenix"
-version  = "1.1.2"
+version  = "1.0.3"
 baseUrl  = "https://novelphoenix.com"
 language = "en"
 icon     = "https://novelphoenix.com/logo.png"
 
--- ── Define cache table ──────────────────────────────────────────────────
 local _pageCache = {}
 
 -- ── Helpers ──────────────────────────────────────────────────────────────
@@ -43,13 +42,11 @@ local function fetchPage(url)
     if _pageCache[url] then
         return _pageCache[url]
     end
-
     local r = http_get(url)
     if r.success then
         _pageCache[url] = r.body
         return r.body
     end
-
     return nil
 end
 
@@ -96,6 +93,7 @@ local function parseNovelItems(body)
         ".rank-container .novel-item",
         ".section-body .novel-item",
         ".novel-list .novel-item",
+        ".search-result .novel-item",   -- for search results
     }) do
         for _, card in ipairs(html_select(body, sel)) do
             local item = parseNovelCard(card.html or card)
@@ -106,6 +104,7 @@ local function parseNovelItems(body)
         end
     end
 
+    -- Fallback: any link to /novel/
     if #items == 0 then
         for _, a in ipairs(html_select(body, "a[href*='/novel/']")) do
             local href = absUrl(a.href or "")
@@ -123,6 +122,8 @@ local function parseNovelItems(body)
 
     return items
 end
+
+-- ── Chapter parsing (handles both <select> and <a> lists) ─────────────
 
 local function parseChapterPage(body, novelSlug)
     local chapters = {}
@@ -151,40 +152,47 @@ local function parseChapterPage(body, novelSlug)
         })
     end
 
-    -- Safe selector: only add the /novel/slug/ prefix when novelSlug is available
-    if novelSlug and novelSlug ~= "" then
-        for _, a in ipairs(html_select(body, "a[href*='/novel/" .. novelSlug .. "/chapter-']")) do
-            addChapter(a.text or "", a.href or "")
+    -- 1) Try <select class="chapindex"> (reading page)
+    local select = html_select_first(body, "select.chapindex")
+    if select then
+        for _, opt in ipairs(html_select(select.html, "option")) do
+            local val = opt:attr("value") or ""
+            local text = opt.text or ""
+            if val ~= "" and text ~= "" then
+                addChapter(text, val)
+            end
         end
     end
 
-    -- Fallback selectors
-    for _, sel in ipairs({
-        ".chapter-list a[href*='/chapter-']",
-        ".chapter-item a[href*='/chapter-']",
-        ".list-chapter a[href*='/chapter-']",
-        "a[href*='/chapter-']",
-    }) do
-        for _, a in ipairs(html_select(body, sel)) do
-            addChapter(a.text or "", a.href or "")
-        end
-    end
-
-    -- Last resort: any link containing /chapter-
+    -- 2) Try <a> links with /chapter- (chapter list page)
     if #chapters == 0 then
-        for _, a in ipairs(html_select(body, "a[href*='/chapter-']")) do
-            addChapter(a.text or "", a.href or "")
+        -- Only build the specific selector if novelSlug is available
+        if novelSlug and novelSlug ~= "" then
+            for _, a in ipairs(html_select(body, "a[href*='/novel/" .. novelSlug .. "/chapter-']")) do
+                addChapter(a.text or "", a.href or "")
+            end
+        end
+
+        -- Fallback: any link containing /chapter-
+        for _, sel in ipairs({
+            ".chapter-list a[href*='/chapter-']",
+            ".chapter-item a[href*='/chapter-']",
+            ".list-chapter a[href*='/chapter-']",
+            "a[href*='/chapter-']",
+        }) do
+            for _, a in ipairs(html_select(body, sel)) do
+                addChapter(a.text or "", a.href or "")
+            end
         end
     end
 
+    -- Sort numerically by chapter number
     local numbered = {}
     for _, ch in ipairs(chapters) do
         local n =
-            tonumber((ch.url or ""):match("/chapter%-(%d+)"))
-            or tonumber((ch.url or ""):match("/(%d+)%-.+/?$"))
-            or tonumber((ch.title or ""):match("^(%d+)"))
-            or 0
-
+            tonumber((ch.url or ""):match("/chapter%-(%d+)")) or
+            tonumber((ch.url or ""):match("/(%d+)%-.+/?$")) or
+            tonumber((ch.title or ""):match("^(%d+)")) or 0
         table.insert(numbered, { n = n, title = ch.title, url = ch.url })
     end
 
@@ -197,10 +205,7 @@ local function parseChapterPage(body, novelSlug)
 
     local sorted = {}
     for _, ch in ipairs(numbered) do
-        table.insert(sorted, {
-            title = ch.title,
-            url = ch.url
-        })
+        table.insert(sorted, { title = ch.title, url = ch.url })
     end
 
     return sorted
@@ -302,7 +307,7 @@ local function fetchAndParseChapterList(bookUrl)
         if body and body ~= "" then
             merge(parseChapterPage(body, slug))
         end
-        sleep(100) -- polite delay between paginated requests
+        sleep(100)
     end
 
     return all
@@ -429,6 +434,8 @@ function getCatalogList(index)
     }
 end
 
+-- ── Improved search ────────────────────────────────────────────────────
+
 function getCatalogSearch(index, query)
     local page = index + 1
     if page > 1 then
@@ -436,7 +443,9 @@ function getCatalogSearch(index, query)
     end
 
     local q = url_encode(query or "")
-    local candidateUrls = {
+
+    -- Priority: actual search endpoints
+    local searchUrls = {
         baseUrl .. "/search-adv?keyword=" .. q,
         baseUrl .. "/search-adv?query=" .. q,
         baseUrl .. "/search-adv?title=" .. q,
@@ -444,27 +453,42 @@ function getCatalogSearch(index, query)
         baseUrl .. "/search?keyword=" .. q,
         baseUrl .. "/search?q=" .. q,
         baseUrl .. "/search?query=" .. q,
+        baseUrl .. "/search?title=" .. q,
     }
 
-    for _, u in ipairs(candidateUrls) do
+    for _, u in ipairs(searchUrls) do
         local r = http_get(u)
         if r.success then
             local items = parseNovelItems(r.body)
             if #items > 0 then
-                return {
-                    items = items,
-                    hasNext = false
-                }
+                return { items = items, hasNext = false }
             end
         end
     end
 
-    -- Fallback: scan browse pages
-    local items = fuzzySearchFallback(query, 6)
-    return {
-        items = items,
-        hasNext = false
-    }
+    -- Fallback: scan browse pages (avoid ranking lists by excluding ranking pages)
+    local results = {}
+    local seen = {}
+    local ql = lower(query)
+
+    -- Scan first few pages of "new" browse, but skip the ranking section
+    for pg = 1, 3 do
+        local urls = buildBrowseUrl("all", "new", "all", pg)
+        local r = http_get(urls[1])
+        if not r.success then break end
+
+        for _, item in ipairs(parseNovelItems(r.body)) do
+            if not seen[item.url] then
+                local title = lower(item.title)
+                if containsIgnoreCase(title, ql) then
+                    seen[item.url] = true
+                    table.insert(results, item)
+                end
+            end
+        end
+    end
+
+    return { items = results, hasNext = false }
 end
 
 function getCatalogFiltered(index, filters)
@@ -472,12 +496,8 @@ function getCatalogFiltered(index, filters)
     local sort = filters["sort"] or "new"
     local status = filters["status"] or "all"
 
-    -- Handle genre (single selection)
     local genres = filters["genre_included"] or {}
-    local genre = "all"
-    if #genres > 0 then
-        genre = genres[1]
-    end
+    local genre = #genres > 0 and genres[1] or "all"
 
     local urls = buildBrowseUrl(genre, sort, status, page)
     local items = parseBrowseLikePage(urls)
@@ -576,8 +596,7 @@ function getBookGenres(bookUrl)
 end
 
 function getChapterList(bookUrl)
-    local chapters = fetchAndParseChapterList(bookUrl)
-    return chapters
+    return fetchAndParseChapterList(bookUrl)
 end
 
 function getChapterListHash(bookUrl)
@@ -612,7 +631,6 @@ function getChapterText(html, url)
     local text = html_text(el.html or "")
     text = cleanText(text)
 
-    -- Remove common navigation / UI leftovers
     text = text:gsub("Restore scroll position.-\n", "")
     text = text:gsub("Restore scroll position.-", "")
     text = text:gsub("Previous Chapter", "")
