@@ -1,10 +1,10 @@
 -- Novel Phoenix plugin for NovaLa
 -- Source: https://novelphoenix.com/
--- Version: 1.0.3
+-- Version: 1.0.4
 
 id       = "novelphoenix"
 name     = "Novel Phoenix"
-version  = "1.0.3"
+version  = "1.0.4"
 baseUrl  = "https://novelphoenix.com"
 language = "en"
 icon     = "https://novelphoenix.com/logo.png"
@@ -93,7 +93,7 @@ local function parseNovelItems(body)
         ".rank-container .novel-item",
         ".section-body .novel-item",
         ".novel-list .novel-item",
-        ".search-result .novel-item",   -- for search results
+        ".search-result .novel-item",
     }) do
         for _, card in ipairs(html_select(body, sel)) do
             local item = parseNovelCard(card.html or card)
@@ -104,7 +104,6 @@ local function parseNovelItems(body)
         end
     end
 
-    -- Fallback: any link to /novel/
     if #items == 0 then
         for _, a in ipairs(html_select(body, "a[href*='/novel/']")) do
             local href = absUrl(a.href or "")
@@ -123,9 +122,9 @@ local function parseNovelItems(body)
     return items
 end
 
--- ── Chapter parsing (handles both <select> and <a> lists) ─────────────
+-- ── Chapter parsing (robust) ───────────────────────────────────────────
 
-local function parseChapterPage(body, novelSlug)
+local function parseChapterLinksFromHtml(body, novelSlug)
     local chapters = {}
     local seen = {}
 
@@ -137,10 +136,10 @@ local function parseChapterPage(body, novelSlug)
             return
         end
 
+        -- Ensure it belongs to this novel and is a chapter link
         if novelSlug and not href:find("/novel/" .. novelSlug .. "/chapter%-") then
             return
         end
-
         if not href:find("/chapter%-") then
             return
         end
@@ -152,47 +151,52 @@ local function parseChapterPage(body, novelSlug)
         })
     end
 
-    -- 1) Try <select class="chapindex"> (reading page)
-    local select = html_select_first(body, "select.chapindex")
+    -- Strategy 1: Look for <select> dropdown (used on reading pages)
+    local select = html_select_first(body, "select.chapindex, select#chapter-select")
     if select then
         for _, opt in ipairs(html_select(select.html, "option")) do
             local val = opt:attr("value") or ""
             local text = opt.text or ""
-            if val ~= "" and text ~= "" then
+            if val ~= "" then
+                -- If the option value is a full URL, use it; otherwise, treat as path
                 addChapter(text, val)
             end
         end
     end
 
-    -- 2) Try <a> links with /chapter- (chapter list page)
+    -- Strategy 2: Look for <a> links containing /chapter-
     if #chapters == 0 then
-        -- Only build the specific selector if novelSlug is available
+        -- Try with specific novel slug first
         if novelSlug and novelSlug ~= "" then
             for _, a in ipairs(html_select(body, "a[href*='/novel/" .. novelSlug .. "/chapter-']")) do
                 addChapter(a.text or "", a.href or "")
             end
         end
 
-        -- Fallback: any link containing /chapter-
-        for _, sel in ipairs({
-            ".chapter-list a[href*='/chapter-']",
-            ".chapter-item a[href*='/chapter-']",
-            ".list-chapter a[href*='/chapter-']",
-            "a[href*='/chapter-']",
-        }) do
-            for _, a in ipairs(html_select(body, sel)) do
-                addChapter(a.text or "", a.href or "")
+        -- Fallback: any link with /chapter-
+        for _, a in ipairs(html_select(body, "a[href*='/chapter-']")) do
+            addChapter(a.text or "", a.href or "")
+        end
+    end
+
+    -- Strategy 3: Regex fallback (catches links inside JavaScript or tricky HTML)
+    if #chapters == 0 then
+        local pattern = 'href%s*=%s*"([^"]*/chapter%-[^"]*)"'
+        local matches = regex_match(body, pattern)
+        if matches then
+            for _, href in ipairs(matches) do
+                -- Try to get title from the link text, or use the URL itself
+                addChapter("Chapter", href)
             end
         end
     end
 
-    -- Sort numerically by chapter number
+    -- Sort by chapter number
     local numbered = {}
     for _, ch in ipairs(chapters) do
-        local n =
-            tonumber((ch.url or ""):match("/chapter%-(%d+)")) or
-            tonumber((ch.url or ""):match("/(%d+)%-.+/?$")) or
-            tonumber((ch.title or ""):match("^(%d+)")) or 0
+        local n = tonumber((ch.url or ""):match("/chapter%-(%d+)")) or
+                  tonumber((ch.url or ""):match("/(%d+)%-.+/?$")) or
+                  tonumber((ch.title or ""):match("^(%d+)")) or 0
         table.insert(numbered, { n = n, title = ch.title, url = ch.url })
     end
 
@@ -211,56 +215,33 @@ local function parseChapterPage(body, novelSlug)
     return sorted
 end
 
-local function collectChapterPageUrls(body, chaptersUrl, novelSlug)
-    local urls = {}
-    local seen = { [chaptersUrl] = true }
-
-    local function add(href)
-        local u = absUrl(href or "")
-        if u ~= "" and not seen[u] and u:find("/novel/" .. novelSlug .. "/chapters") then
-            seen[u] = true
-            table.insert(urls, u)
-        end
-    end
-
-    for _, a in ipairs(html_select(body, "a[href*='/novel/" .. novelSlug .. "/chapters']")) do
-        add(a.href)
-    end
-
-    return urls
-end
-
 local function fetchChapterListPages(bookUrl)
     local slug = bookUrl:match("/novel/([^/?#]+)")
     if not slug then return {} end
 
     local base = bookUrl:gsub("/?$", "")
-    local firstUrl = base .. "/chapters"
-
-    local tried = {
-        firstUrl,
-        firstUrl .. "/",
-        firstUrl .. "?page=1",
-        firstUrl .. "/page/1",
+    local variations = {
+        base .. "/chapters",
+        base .. "/chapters/",
+        base .. "/chapters-list",
+        base .. "/chapter-list",
+        base .. "/chapters?page=1",
+        base .. "/chapters/page/1",
     }
 
     local pages = {}
     local seenPage = {}
-
-    local function addPage(url)
-        if url and url ~= "" and not seenPage[url] then
-            seenPage[url] = true
-            table.insert(pages, url)
-        end
-    end
-
     local firstBody = nil
-    for _, url in ipairs(tried) do
-        local body = fetchPage(url)
-        if body and body ~= "" then
-            firstBody = body
-            addPage(url)
-            break
+
+    for _, url in ipairs(variations) do
+        if not seenPage[url] then
+            seenPage[url] = true
+            local body = fetchPage(url)
+            if body and body ~= "" then
+                firstBody = body
+                table.insert(pages, url)
+                break
+            end
         end
     end
 
@@ -268,8 +249,13 @@ local function fetchChapterListPages(bookUrl)
         return {}
     end
 
-    for _, u in ipairs(collectChapterPageUrls(firstBody, firstUrl, slug)) do
-        addPage(u)
+    -- Check for pagination links on the chapters page
+    for _, a in ipairs(html_select(firstBody, "a[href*='/page/']")) do
+        local href = absUrl(a.href or "")
+        if href ~= "" and not seenPage[href] and href:find("/chapters") then
+            seenPage[href] = true
+            table.insert(pages, href)
+        end
     end
 
     return pages, firstBody
@@ -300,12 +286,12 @@ local function fetchAndParseChapterList(bookUrl)
         end
     end
 
-    merge(parseChapterPage(firstBody, slug))
+    merge(parseChapterLinksFromHtml(firstBody, slug))
 
     for i = 2, #pages do
         local body = fetchPage(pages[i])
         if body and body ~= "" then
-            merge(parseChapterPage(body, slug))
+            merge(parseChapterLinksFromHtml(body, slug))
         end
         sleep(100)
     end
@@ -434,8 +420,6 @@ function getCatalogList(index)
     }
 end
 
--- ── Improved search ────────────────────────────────────────────────────
-
 function getCatalogSearch(index, query)
     local page = index + 1
     if page > 1 then
@@ -444,7 +428,6 @@ function getCatalogSearch(index, query)
 
     local q = url_encode(query or "")
 
-    -- Priority: actual search endpoints
     local searchUrls = {
         baseUrl .. "/search-adv?keyword=" .. q,
         baseUrl .. "/search-adv?query=" .. q,
@@ -466,12 +449,11 @@ function getCatalogSearch(index, query)
         end
     end
 
-    -- Fallback: scan browse pages (avoid ranking lists by excluding ranking pages)
+    -- Fallback: scan browse pages
     local results = {}
     local seen = {}
     local ql = lower(query)
 
-    -- Scan first few pages of "new" browse, but skip the ranking section
     for pg = 1, 3 do
         local urls = buildBrowseUrl("all", "new", "all", pg)
         local r = http_get(urls[1])
