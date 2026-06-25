@@ -63,7 +63,7 @@ sources:
     language: "en"
   - id: "novelphoenix"
     name: "Novel Phoenix"
-    version: "1.0.2"
+    version: "1.0.3"
     url: "https://raw.githubusercontent.com/Vaizer0/external-sources/refs/heads/main/en/novelphoenix.lua"
     icon: "https://novelphoenix.com/logo.png"
     language: "en"
