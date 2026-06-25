@@ -1,11 +1,18 @@
+-- Novel Phoenix plugin for NovaLa
+-- Source: https://novelphoenix.com/
+-- Version: 1.0.2
+
 id       = "novelphoenix"
 name     = "Novel Phoenix"
-version  = "1.1.0"
+version  = "1.0.2"
 baseUrl  = "https://novelphoenix.com"
 language = "en"
 icon     = "https://novelphoenix.com/logo.png"
 
+-- ── Define cache table ──────────────────────────────────────────────────
 local _pageCache = {}
+
+-- ── Helpers ──────────────────────────────────────────────────────────────
 
 local function absUrl(href)
     if not href or href == "" then return "" end
@@ -45,6 +52,8 @@ local function fetchPage(url)
 
     return nil
 end
+
+-- ── Parsing functions ──────────────────────────────────────────────────
 
 local function parseNovelCard(cardHtml)
     local titleEl =
@@ -142,24 +151,28 @@ local function parseChapterPage(body, novelSlug)
         })
     end
 
+    -- Safe selector: only add the /novel/slug/ prefix when novelSlug is available
+    if novelSlug and novelSlug ~= "" then
+        for _, a in ipairs(html_select(body, "a[href*='/novel/" .. novelSlug .. "/chapter-']")) do
+            addChapter(a.text or "", a.href or "")
+        end
+    end
+
+    -- Fallback selectors
     for _, sel in ipairs({
-        "a[href*='/novel/" .. (novelSlug or "") .. "/chapter-']",
         ".chapter-list a[href*='/chapter-']",
         ".chapter-item a[href*='/chapter-']",
         ".list-chapter a[href*='/chapter-']",
         "a[href*='/chapter-']",
     }) do
-        if novelSlug == "" and sel:find("/novel/") then
-            -- skip invalid selector construction
-        else
-            for _, a in ipairs(html_select(body, sel)) do
-                addChapter(a.text or "", a.href or "")
-            end
+        for _, a in ipairs(html_select(body, sel)) do
+            addChapter(a.text or "", a.href or "")
         end
     end
 
-    if #chapters == 0 and novelSlug then
-        for _, a in ipairs(html_select(body, "a[href*='/novel/" .. novelSlug .. "/']")) do
+    -- Last resort: any link containing /chapter-
+    if #chapters == 0 then
+        for _, a in ipairs(html_select(body, "a[href*='/chapter-']")) do
             addChapter(a.text or "", a.href or "")
         end
     end
@@ -259,10 +272,16 @@ end
 
 local function fetchAndParseChapterList(bookUrl)
     local slug = bookUrl:match("/novel/([^/?#]+)")
-    if not slug then return {} end
+    if not slug then
+        log_error("novelphoenix: could not extract slug from " .. bookUrl)
+        return {}
+    end
 
     local pages, firstBody = fetchChapterListPages(bookUrl)
-    if not firstBody then return {} end
+    if not firstBody then
+        log_error("novelphoenix: failed to fetch chapters page for " .. bookUrl)
+        return {}
+    end
 
     local all = {}
     local seen = {}
@@ -283,6 +302,7 @@ local function fetchAndParseChapterList(bookUrl)
         if body and body ~= "" then
             merge(parseChapterPage(body, slug))
         end
+        sleep(100) -- polite delay between paginated requests
     end
 
     return all
@@ -345,6 +365,8 @@ local function fuzzySearchFallback(query, maxPages)
     return results
 end
 
+-- ── Required plugin functions ──────────────────────────────────────────
+
 function getFilterList()
     return {
         {
@@ -364,7 +386,7 @@ function getFilterList()
             defaultValue = "all",
             options = {
                 { value = "all",       label = "All" },
-                { value = "completed",  label = "Completed" },
+                { value = "completed", label = "Completed" },
             }
         },
         {
@@ -437,6 +459,7 @@ function getCatalogSearch(index, query)
         end
     end
 
+    -- Fallback: scan browse pages
     local items = fuzzySearchFallback(query, 6)
     return {
         items = items,
@@ -448,8 +471,13 @@ function getCatalogFiltered(index, filters)
     local page = index + 1
     local sort = filters["sort"] or "new"
     local status = filters["status"] or "all"
+
+    -- Handle genre (single selection)
     local genres = filters["genre_included"] or {}
-    local genre = genres[1] or "all"
+    local genre = "all"
+    if #genres > 0 then
+        genre = genres[1]
+    end
 
     local urls = buildBrowseUrl(genre, sort, status, page)
     local items = parseBrowseLikePage(urls)
@@ -584,6 +612,7 @@ function getChapterText(html, url)
     local text = html_text(el.html or "")
     text = cleanText(text)
 
+    -- Remove common navigation / UI leftovers
     text = text:gsub("Restore scroll position.-\n", "")
     text = text:gsub("Restore scroll position.-", "")
     text = text:gsub("Previous Chapter", "")
