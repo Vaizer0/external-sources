@@ -8,8 +8,6 @@ version  = "1.0.0"
 baseUrl  = "https://novelphoenix.com"
 language = "en"
 icon     = "https://novelphoenix.com/logo.png"
-charset  = "UTF-8"
-
 -- ── Helpers ──────────────────────────────────────────────────────────────
 
 local function absUrl(href)
@@ -45,14 +43,14 @@ local function parseCatalogItems(body)
     local items = {}
     local seen = {}
 
-    -- Look for novel cards on homepage or listing pages
-    local cards = html_select(body, ".novel-item, .book-item, .list-item, .col-lg-3 .item-summary")
+    -- Try to find novel items in the page
+    local cards = html_select(body, ".novel-item, .rank-container .novel-item, .novel-list .novel-item")
     if #cards == 0 then
         cards = html_select(body, "a[href*='/novel/']")
     end
 
     for _, card in ipairs(cards) do
-        local titleEl = html_select_first(card.html, "h3 a, h4 a, .title a, a[href*='/novel/']")
+        local titleEl = html_select_first(card.html, "h4.novel-title a, h4 a, .novel-title a, a[title]")
         if not titleEl then
             titleEl = html_select_first(card.html, "a[href*='/novel/']")
         end
@@ -61,7 +59,8 @@ local function parseCatalogItems(body)
             local url = absUrl(titleEl.href or "")
             if title ~= "" and url ~= "" and not seen[url] then
                 seen[url] = true
-                local cover = html_attr(card.html, "img", "src")
+                local cover = html_attr(card.html, ".novel-cover img", "src")
+                if cover == "" then cover = html_attr(card.html, "img", "src") end
                 if cover == "" then cover = html_attr(card.html, "img", "data-src") end
                 cover = absUrl(cover)
                 table.insert(items, {
@@ -78,6 +77,9 @@ end
 
 local function hasNextPage(body)
     local nextLink = html_select_first(body, ".pagination .next a, .next-page a, a[rel='next']")
+    if not nextLink then
+        nextLink = html_select_first(body, ".load-more a, .show-more a")
+    end
     return nextLink ~= nil
 end
 
@@ -120,128 +122,148 @@ end
 function getBookTitle(bookUrl)
     local body = fetchPage(bookUrl)
     if not body then return nil end
-    local el = html_select_first(body, "h1, .novel-title, .post-title h1")
+
+    local el = html_select_first(body, "h1.novel-title, .novel-title h1, h1")
     if el and el.text and el.text ~= "" then
         return string_clean(el.text)
     end
+
     local og = html_select_first(body, "meta[property='og:title']")
     if og and og.content and og.content ~= "" then
         return string_clean(og.content)
     end
+
     return nil
 end
 
 function getBookCoverImageUrl(bookUrl)
     local body = fetchPage(bookUrl)
     if not body then return nil end
+
     local og = html_select_first(body, "meta[property='og:image']")
     if og and og.content and og.content ~= "" then
         return absUrl(og.content)
     end
-    local img = html_select_first(body, ".novel-cover img, .summary_image img, .item-thumb img")
+
+    local img = html_select_first(body, ".cover img, .novel-cover img, .fixed-img .cover img")
     if img then
         local src = img.src or img["data-src"] or ""
         if src ~= "" then return absUrl(src) end
     end
+
     return nil
 end
 
 function getBookDescription(bookUrl)
     local body = fetchPage(bookUrl)
     if not body then return nil end
+
     local og = html_select_first(body, "meta[property='og:description']")
     if og and og.content and og.content ~= "" then
         return string_clean(og.content)
     end
-    local el = html_select_first(body, ".summary, .description, .novel-description, .summary__content")
+
+    local el = html_select_first(body, ".summary .content, .summary__content, .description-summary .summary__content")
     if el and el.text and el.text ~= "" then
         return cleanText(el.text)
     end
+
     return nil
 end
 
 function getBookGenres(bookUrl)
     local body = fetchPage(bookUrl)
     if not body then return {} end
+
     local genres = {}
     local seen = {}
-    for _, a in ipairs(html_select(body, ".genres a, .tags a, .genre-list a, .categories a")) do
+
+    for _, a in ipairs(html_select(body, ".categories a, .genres a, .genre-list a")) do
         local g = string_clean(a.text or "")
         if g ~= "" and not seen[g] then
             seen[g] = true
             table.insert(genres, g)
         end
     end
+
     return genres
 end
 
 -- ── Chapter List ────────────────────────────────────────────────────────
 
--- Extract the novel slug from the book URL (e.g., "shadow-slave")
 local function getNovelSlug(bookUrl)
     return bookUrl:match("/novel/([^/]+)/?")
 end
 
--- Fetch chapters from the dedicated /chapters page
 local function fetchChaptersPage(novelSlug, page)
-    local url = baseUrl .. "/novel/" .. novelSlug .. "/chapters"
+    local url = baseUrl .. "/novel/" .. novelSlug
     if page and page > 1 then
         url = url .. "?page=" .. page
     end
-    local r = http_get(url, {
-        headers = {
-            ["X-Requested-With"] = "XMLHttpRequest",
-        }
-    })
+    local r = http_get(url)
     if not r.success then return nil end
     return r.body
 end
 
--- Parse chapter links from the chapters page HTML
 local function parseChapterLinksFromHtml(html)
     local chapters = {}
     local seen = {}
 
-    -- Look for chapter items in the list
-    local items = html_select(html, ".chapter-item, .list-group-item, .chapter-list li, ul li a[href*='/chapter-']")
+    -- Look for chapter links in the page
+    -- Novel Phoenix uses a select dropdown or a list
+    local items = html_select(html, "select.chapindex option, .chapter-item a, .list-chapter a, a[href*='/chapter-']")
     if #items == 0 then
         items = html_select(html, "a[href*='/chapter-']")
     end
 
     for _, item in ipairs(items) do
-        local a = html_select_first(item.html, "a[href*='/chapter-']")
-        if not a then
-            a = item
+        local a = item
+        local href = a.href or ""
+        local title = a.text or ""
+
+        -- If it's an option, get the value and text
+        if item.tag == "option" then
+            href = item:attr("value") or ""
+            title = item.text or ""
         end
-        if a and a.href and a.href ~= "" then
-            local href = absUrl(a.href)
-            if href ~= "" and not seen[href] then
-                seen[href] = true
-                local title = string_clean(a.text or "")
-                if title == "" then
-                    -- Try to extract chapter number from URL
-                    local num = href:match("/chapter%-(%d+)")
-                    title = "Chapter " .. (num or "?")
-                end
-                table.insert(chapters, {
-                    title = title,
-                    url = href
-                })
-            end
+
+        href = absUrl(href)
+        title = string_clean(title)
+
+        if href ~= "" and title ~= "" and not seen[href] then
+            seen[href] = true
+            table.insert(chapters, {
+                title = title,
+                url = href
+            })
         end
     end
 
-    return chapters
-end
-
--- Get total number of chapters (from the /chapters page info)
-local function getTotalChapters(html)
-    local info = html_select_first(html, ".chapter-count, .total-chapters, p:contains('total of')")
-    if info then
-        local count = info.text:match("(%d+) chapters")
-        if count then return tonumber(count) end
+    -- Sort by chapter number if possible
+    local numbered = {}
+    for _, ch in ipairs(chapters) do
+        local n = tonumber((ch.title or ""):match("^(%d+)")) or
+                  tonumber((ch.url or ""):match("chapter%-(%d+)")) or
+                  tonumber((ch.url or ""):match("/(%d+)%-[^/]+/?$")) or 0
+        table.insert(numbered, { n = n, title = ch.title, url = ch.url })
     end
-    return nil
+
+    table.sort(numbered, function(a, b)
+        if a.n == b.n then
+            return a.url < b.url
+        end
+        return a.n < b.n
+    end)
+
+    local sorted = {}
+    for _, ch in ipairs(numbered) do
+        table.insert(sorted, {
+            title = ch.title,
+            url = ch.url
+        })
+    end
+
+    return sorted
 end
 
 function getChapterList(bookUrl)
@@ -251,34 +273,26 @@ function getChapterList(bookUrl)
         return {}
     end
 
-    -- Fetch the first page of chapters
+    -- Try to get chapters from the novel page
     local html = fetchChaptersPage(novelSlug, 1)
     if not html then return {} end
 
-    local allChapters = parseChapterLinksFromHtml(html)
+    local chapters = parseChapterLinksFromHtml(html)
+    if #chapters > 0 then
+        return chapters
+    end
 
-    -- Check if there are more pages (pagination)
-    -- The site may have pagination for the chapter list
-    local nextPage = 2
-    while true do
-        local nextHtml = fetchChaptersPage(novelSlug, nextPage)
-        if not nextHtml then break end
-        local moreChapters = parseChapterLinksFromHtml(nextHtml)
-        if #moreChapters == 0 then break end
-        for _, ch in ipairs(moreChapters) do
-            table.insert(allChapters, ch)
+    -- If no chapters found, try to get them from the chapters page
+    local chaptersUrl = bookUrl:gsub("/?$", "") .. "/chapters"
+    local r = http_get(chaptersUrl)
+    if r and r.success and r.body then
+        chapters = parseChapterLinksFromHtml(r.body)
+        if #chapters > 0 then
+            return chapters
         end
-        nextPage = nextPage + 1
-        sleep(200) -- be gentle
     end
 
-    -- Reverse to get oldest first (most sites show newest first)
-    local reversed = {}
-    for i = #allChapters, 1, -1 do
-        table.insert(reversed, allChapters[i])
-    end
-
-    return reversed
+    return {}
 end
 
 function getChapterListHash(bookUrl)
@@ -300,9 +314,8 @@ function getChapterText(html, url)
     html = html:gsub("<!%-%-.-%-%->", "")
 
     -- Look for the content container
-    local el = html_select_first(html, ".chapter-content, .reading-content, .entry-content, .novel-content, #content, article")
+    local el = html_select_first(html, "#content, .chapter-content, .reading-content, .entry-content, .novel-content, article")
     if not el then
-        -- Try to find the main text in the body
         el = html_select_first(html, "body")
         if not el then return "" end
     end
@@ -342,10 +355,10 @@ function getFilterList()
             label = "Status",
             defaultValue = "all",
             options = {
-                { value = "all",      label = "All" },
-                { value = "ongoing",  label = "Ongoing" },
+                { value = "all",       label = "All" },
+                { value = "ongoing",   label = "Ongoing" },
                 { value = "completed", label = "Completed" },
-                { value = "dropped",  label = "Dropped" },
+                { value = "dropped",   label = "Dropped" },
             }
         },
         {
