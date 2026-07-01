@@ -1,7 +1,7 @@
 ﻿-- ── Метаданные ────────────────────────────────────────────────────────────────
 id       = "freewebnovel"
 name     = "FreeWebNovel"
-version  = "1.0.1"
+version  = "1.0.2"
 baseUrl  = "https://freewebnovel.com"
 language = "en"
 icon     = "https://raw.githubusercontent.com/HnDK0/external-sources/main/icons/freewebnovel.png"
@@ -116,14 +116,39 @@ function getBookDescription(bookUrl)
   return nil
 end
 
--- ── Список глав (NONE, порядок не меняется) ───────────────────────────────────
+-- ── Список глав через AJAX-пагинацию ──────────────────────────────────────────
+-- Сайт отдаёт главы порциями по 200 шт: ?ajax=chapters&page=N&pageSize=200
+-- Страница 1 = самые старые главы (прямой порядок, как ожидает движок).
 
-function getChapterList(bookUrl)
-  local r = http_get(bookUrl)
-  if not r.success then return {} end
+local CHAPTERS_PAGE_SIZE = 200
 
+local function fetchChaptersAjax(bookUrl, page, pageSize)
+  local sep = bookUrl:find("?") and "&" or "?"
+  local url = bookUrl .. sep .. "ajax=chapters&page=" .. tostring(page) .. "&pageSize=" .. tostring(pageSize)
+
+  local r = http_get(url, {
+    headers = {
+      ["X-Requested-With"] = "XMLHttpRequest",
+      ["Accept"]           = "application/json, text/javascript, */*; q=0.01",
+    }
+  })
+  if not r.success then
+    log_error("freewebnovel: chapters ajax failed code=" .. tostring(r.code) .. " page=" .. tostring(page))
+    return nil
+  end
+
+  local data = json_parse(r.body)
+  if not data or not data.html then
+    log_error("freewebnovel: json_parse failed or missing html, page=" .. tostring(page))
+    return nil
+  end
+  return data
+end
+
+local function extractChaptersFromHtml(html)
   local chapters = {}
-  for _, a in ipairs(html_select(r.body, "#idData li a")) do
+  if not html or html == "" then return chapters end
+  for _, a in ipairs(html_select(html, "a[href]")) do
     local chUrl = absUrl(a.href)
     if chUrl ~= "" then
       -- title берётся из атрибута title, не из текста
@@ -135,18 +160,19 @@ function getChapterList(bookUrl)
       })
     end
   end
-
   return chapters
 end
 
--- ── Хэш для обновлений ────────────────────────────────────────────────────────
+-- ── Пагинированный список глав ────────────────────────────────────────────────
 
-function getChapterListHash(bookUrl)
-  local r = http_get(bookUrl)
-  if not r.success then return nil end
-  local el = html_select_first(r.body, ".m-newest1 ul.ul-list5 li:first-child a")
-  if el then return el.href end
-  return nil
+function parsePage(bookUrl, page)
+  local data = fetchChaptersAjax(bookUrl, page, CHAPTERS_PAGE_SIZE)
+  if not data then return { chapters = {}, totalPages = 1 } end
+
+  local totalPages = tonumber(data.totalPage) or 1
+  local chapters = extractChaptersFromHtml(data.html)
+
+  return { chapters = chapters, totalPages = totalPages }
 end
 
 -- ── Жанры книги ───────────────────────────────────────────────────────────────
